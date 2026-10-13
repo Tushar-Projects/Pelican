@@ -1,0 +1,309 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { getSession, updateSession } from '../api/sessions.js';
+import { recordTransfer } from '../api/transfers.js';
+import { createPeer } from '../api/peerProvider.js';
+import { useAuth } from '../context/AuthContext.jsx';
+import StatusBadge from '../components/StatusBadge.jsx';
+import DropZone from '../components/DropZone.jsx';
+import TransferQueue from '../components/TransferQueue.jsx';
+import QrCodeModal from '../components/QrCodeModal.jsx';
+
+export function SessionPage() {
+  const { code } = useParams();
+  const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
+
+  const [sessionInfo, setSessionInfo] = useState(null);
+  const [peerStatus, setPeerStatus] = useState('connecting');
+  const [remoteDeviceName, setRemoteDeviceName] = useState(null);
+  const [queue, setQueue] = useState([]);
+  const [showQrModal, setShowQrModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState(null);
+  const [isExtending, setIsExtending] = useState(false);
+
+  const peerRef = useRef(null);
+  const normalizedCode = (code || '').trim().toUpperCase();
+
+  const deviceName =
+    localStorage.getItem('droprelay_device_name') || 'Web Client';
+
+  // 1. Validate session on server
+  useEffect(() => {
+    let isMounted = true;
+
+    async function checkSession() {
+      try {
+        const info = await getSession(normalizedCode);
+        if (isMounted) setSessionInfo(info);
+      } catch (err) {
+        if (isMounted) {
+          setErrorMessage(err.message || 'Session not found or expired');
+          setPeerStatus('failed');
+        }
+      }
+    }
+
+    checkSession();
+    return () => {
+      isMounted = false;
+    };
+  }, [normalizedCode]);
+
+  // 2. Initialize Peer connection
+  useEffect(() => {
+    if (errorMessage) return;
+
+    const wsUrl =
+      import.meta.env.VITE_WS_URL ||
+      `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.hostname}:5000/ws`;
+
+    const iceServers = [];
+    if (import.meta.env.VITE_STUN_URL) {
+      iceServers.push({ urls: import.meta.env.VITE_STUN_URL });
+    }
+    if (import.meta.env.VITE_TURN_URL) {
+      iceServers.push({
+        urls: import.meta.env.VITE_TURN_URL,
+        username: import.meta.env.VITE_TURN_USER || '',
+        credential: import.meta.env.VITE_TURN_PASS || '',
+      });
+    }
+
+    const peer = createPeer({
+      code: normalizedCode,
+      deviceName,
+      wsUrl,
+      iceServers: iceServers.length > 0 ? iceServers : undefined,
+    });
+
+    peerRef.current = peer;
+
+    peer.on('status', (s) => {
+      setPeerStatus(s);
+    });
+
+    peer.on('peer', ({ deviceName: rDevice }) => {
+      setRemoteDeviceName(rDevice);
+    });
+
+    peer.on('incoming', ({ id, name, size }) => {
+      setQueue((prev) => [
+        {
+          id,
+          name,
+          size,
+          direction: 'received',
+          status: 'in_progress',
+          percent: 0,
+          bytes: 0,
+          speedBps: 0,
+        },
+        ...prev,
+      ]);
+    });
+
+    peer.on('progress', (progress) => {
+      setQueue((prev) =>
+        prev.map((item) =>
+          item.id === progress.id ? { ...item, ...progress, status: 'in_progress' } : item
+        )
+      );
+    });
+
+    peer.on('file-complete', async (result) => {
+      setQueue((prev) =>
+        prev.map((item) =>
+          item.id === result.id ? { ...item, ...result, status: 'completed' } : item
+        )
+      );
+
+      // Section 6: UI agent saves history by calling POST /api/transfers
+      if (isAuthenticated) {
+        try {
+          await recordTransfer({
+            sessionCode: normalizedCode,
+            deviceName: remoteDeviceName || 'Remote Device',
+            fileName: result.name,
+            fileSize: result.size,
+            direction: result.direction,
+            status: 'completed',
+            avgSpeedBps: result.avgSpeedBps || 0,
+            durationMs: result.durationMs || 0,
+            sha256: result.sha256 || '',
+          });
+        } catch (err) {
+          console.warn('Failed to save transfer history:', err.message);
+        }
+      }
+    });
+
+    peer.on('error', async (err) => {
+      setErrorMessage(err.message || 'Transfer error occurred');
+      if (isAuthenticated) {
+        try {
+          await recordTransfer({
+            sessionCode: normalizedCode,
+            deviceName: remoteDeviceName || 'Remote Device',
+            fileName: 'Transfer',
+            fileSize: 0,
+            direction: 'sent',
+            status: 'failed',
+            avgSpeedBps: 0,
+            durationMs: 0,
+            sha256: '',
+          });
+        } catch (saveErr) {
+          // ignore
+        }
+      }
+    });
+
+    return () => {
+      if (peerRef.current) {
+        peerRef.current.close();
+      }
+    };
+  }, [normalizedCode, deviceName, isAuthenticated, remoteDeviceName]);
+
+  const handleFilesSelected = async (files) => {
+    if (!peerRef.current || peerStatus !== 'connected') return;
+
+    // Add files to queue UI optimistically
+    const newItems = files.map((file, idx) => ({
+      id: `local_${Date.now()}_${idx}`,
+      name: file.name,
+      size: file.size,
+      direction: 'sent',
+      status: 'queued',
+      percent: 0,
+      bytes: 0,
+      speedBps: 0,
+    }));
+
+    setQueue((prev) => [...newItems, ...prev]);
+
+    try {
+      await peerRef.current.sendFiles(files);
+    } catch (err) {
+      console.error('Send files error:', err);
+    }
+  };
+
+  const handleCancel = (fileId) => {
+    if (peerRef.current) {
+      peerRef.current.cancel(fileId);
+    }
+    setQueue((prev) =>
+      prev.map((item) =>
+        item.id === fileId ? { ...item, status: 'cancelled', error: 'Cancelled by user' } : item
+      )
+    );
+  };
+
+  const handleExtendSession = async () => {
+    try {
+      setIsExtending(true);
+      const updated = await updateSession(normalizedCode, { extendMinutes: 15 });
+      setSessionInfo(updated);
+    } catch (err) {
+      setErrorMessage(err.message || 'Failed to extend session');
+    } finally {
+      setIsExtending(false);
+    }
+  };
+
+  const handleCloseSession = async () => {
+    try {
+      await updateSession(normalizedCode, { status: 'closed' });
+      navigate('/');
+    } catch (err) {
+      setErrorMessage(err.message || 'Failed to close session');
+    }
+  };
+
+  if (errorMessage && !sessionInfo) {
+    return (
+      <div className="session-page error-view">
+        <div className="alert alert-error">
+          <h3>Session Unavailable</h3>
+          <p>{errorMessage}</p>
+        </div>
+        <button onClick={() => navigate('/')} className="btn-primary mt-4">
+          ← Return to Home
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="session-page">
+      <div className="session-header">
+        <div className="session-title-group">
+          <span className="session-label">Session Code:</span>
+          <h2 className="session-code-badge">{normalizedCode}</h2>
+          <button
+            onClick={() => setShowQrModal(true)}
+            className="btn-secondary btn-sm qr-btn"
+            title="Show QR Code"
+          >
+            📱 QR Code
+          </button>
+        </div>
+
+        <div className="session-status-group">
+          <StatusBadge status={peerStatus} />
+          {remoteDeviceName && (
+            <span className="remote-peer-info">
+              Paired with: <strong>{remoteDeviceName}</strong>
+            </span>
+          )}
+        </div>
+      </div>
+
+      {sessionInfo && (
+        <div className="session-controls-bar">
+          <span className="expires-text">
+            Expires: {new Date(sessionInfo.expiresAt).toLocaleTimeString()}
+          </span>
+          {isAuthenticated && (
+            <div className="session-action-buttons">
+              <button
+                onClick={handleExtendSession}
+                disabled={isExtending}
+                className="btn-secondary btn-sm"
+              >
+                {isExtending ? 'Extending...' : '+15 Mins'}
+              </button>
+              <button
+                onClick={handleCloseSession}
+                className="btn-danger btn-sm"
+              >
+                Close Session
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {errorMessage && <div className="alert alert-error">{errorMessage}</div>}
+
+      <div className="session-workspace">
+        <DropZone
+          onFilesSelected={handleFilesSelected}
+          disabled={peerStatus !== 'connected'}
+        />
+
+        <TransferQueue items={queue} onCancel={handleCancel} />
+      </div>
+
+      <QrCodeModal
+        code={normalizedCode}
+        isOpen={showQrModal}
+        onClose={() => setShowQrModal(false)}
+      />
+    </div>
+  );
+}
+
+export default SessionPage;
