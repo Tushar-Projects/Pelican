@@ -1,5 +1,5 @@
 /**
- * DropRelay Transfer Engine Public API
+ * Pelican Transfer Engine Public API
  * per CONTRACTS.md Section 6
  */
 

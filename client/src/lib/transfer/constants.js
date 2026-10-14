@@ -1,5 +1,5 @@
 /**
- * DropRelay Data Channel Transfer Constants
+ * Pelican Data Channel Transfer Constants
  * per CONTRACTS.md Section 5
  */
 
