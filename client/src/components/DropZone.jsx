@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { Upload } from 'lucide-react';
 
 export function DropZone({ onFilesSelected, disabled = false }) {
   const [isDragOver, setIsDragOver] = useState(false);
@@ -39,18 +40,33 @@ export function DropZone({ onFilesSelected, disabled = false }) {
     }
   };
 
+  const triggerPicker = () => {
+    if (!disabled && fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (disabled) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      triggerPicker();
+    }
+  };
+
   return (
     <div
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-disabled={disabled}
+      aria-label={disabled ? 'File selection disabled' : 'Select files to send'}
       className={`dropzone ${isDragOver ? 'dropzone-active' : ''} ${disabled ? 'dropzone-disabled' : ''}`}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
-      onClick={() => {
-        if (!disabled && fileInputRef.current) {
-          fileInputRef.current.click();
-        }
-      }}
+      onClick={triggerPicker}
+      onKeyDown={handleKeyDown}
     >
       <input
         type="file"
@@ -59,22 +75,19 @@ export function DropZone({ onFilesSelected, disabled = false }) {
         multiple
         style={{ display: 'none' }}
         disabled={disabled}
+        aria-hidden="true"
       />
       <div className="dropzone-content">
-        <div className="dropzone-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="48" height="48">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="17 8 12 3 7 8" />
-            <line x1="12" y1="3" x2="12" y2="15" />
-          </svg>
+        <div className="dropzone-icon" aria-hidden="true">
+          <Upload size={32} strokeWidth={1.5} />
         </div>
         <h3 className="dropzone-title">
-          {disabled ? 'Waiting for Peer to Connect' : 'Drop Files Here or Click to Browse'}
+          {disabled ? 'Waiting for the other device to connect' : 'Drop files here or tap to browse'}
         </h3>
         <p className="dropzone-subtitle">
           {disabled
-            ? 'Pair with another device to start sharing files P2P'
-            : 'Transfer directly device-to-device with WebRTC. No size limits.'}
+            ? 'Files can be selected once the connection is established'
+            : 'Any file type or size, direct device-to-device'}
         </p>
       </div>
     </div>

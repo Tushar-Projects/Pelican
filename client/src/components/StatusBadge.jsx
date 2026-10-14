@@ -1,24 +1,23 @@
 import React from 'react';
 
 const STATUS_CONFIG = {
-  connecting: { label: 'Connecting...', color: 'bg-amber-500', text: 'text-amber-400' },
-  'waiting-peer': { label: 'Waiting for Peer', color: 'bg-sky-500', text: 'text-sky-400' },
-  connected: { label: 'Peer Connected', color: 'bg-emerald-500', text: 'text-emerald-400' },
-  disconnected: { label: 'Disconnected', color: 'bg-zinc-500', text: 'text-zinc-400' },
-  failed: { label: 'Connection Failed', color: 'bg-rose-500', text: 'text-rose-400' },
+  connecting: { label: 'Connecting...', className: 'badge-warn' },
+  'waiting-peer': { label: 'Waiting for the other device', className: 'badge-accent' },
+  connected: { label: 'Connected', className: 'badge-ok' },
+  disconnected: { label: 'Peer disconnected', className: 'badge-muted' },
+  failed: { label: 'Connection failed', className: 'badge-bad' },
 };
 
 export function StatusBadge({ status = 'connecting' }) {
   const config = STATUS_CONFIG[status] || {
     label: status,
-    color: 'bg-zinc-500',
-    text: 'text-zinc-400',
+    className: 'badge-muted',
   };
 
   return (
-    <div className="status-badge" data-status={status}>
-      <span className="status-dot"></span>
-      <span className="status-text">{config.label}</span>
+    <div className={`badge ${config.className}`} data-status={status}>
+      <span className="status-dot" aria-hidden="true" />
+      <span>{config.label}</span>
     </div>
   );
 }

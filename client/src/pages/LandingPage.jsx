@@ -1,35 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { createSession } from '../api/sessions.js';
-
-function getInitialDeviceName() {
-  try {
-    let name = localStorage.getItem('pelican_device_name');
-    if (!name) {
-      const legacy = localStorage.getItem('droprelay_device_name');
-      if (legacy) {
-        name = legacy;
-        localStorage.setItem('pelican_device_name', legacy);
-        localStorage.removeItem('droprelay_device_name');
-      }
-    }
-    return name || 'Web Client';
-  } catch (e) {
-    return 'Web Client';
-  }
-}
-
-function persistDeviceName(name) {
-  try {
-    localStorage.setItem('pelican_device_name', name.trim());
-    localStorage.removeItem('droprelay_device_name');
-  } catch (e) {}
-}
+import { getDeviceName, setDeviceName as persistDeviceName } from '../utils/deviceName.js';
 
 export function LandingPage() {
   const navigate = useNavigate();
   const [joinCode, setJoinCode] = useState('');
-  const [deviceName, setDeviceName] = useState(getInitialDeviceName);
+  const [deviceName, setDeviceName] = useState(() => getDeviceName('Web Client'));
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState(null);
 
