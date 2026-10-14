@@ -24,6 +24,8 @@ export function SessionPage() {
   const [isExtending, setIsExtending] = useState(false);
 
   const peerRef = useRef(null);
+  const pendingProgressRef = useRef(new Map());
+  const progressRafRef = useRef(null);
   const normalizedCode = (code || '').trim().toUpperCase();
 
   const deviceName =
@@ -110,19 +112,44 @@ export function SessionPage() {
 
     peer.on('progress', (progress) => {
       if (cancelled) return;
-      setQueue((prev) =>
-        prev.map((item) =>
-          item.id === progress.id
-            ? item.status === 'cancelled'
-              ? item
-              : { ...item, ...progress, status: 'in_progress' }
-            : item
-        )
-      );
+      pendingProgressRef.current.set(progress.id, progress);
+
+      if (!progressRafRef.current) {
+        progressRafRef.current = requestAnimationFrame(() => {
+          progressRafRef.current = null;
+          if (cancelled || pendingProgressRef.current.size === 0) return;
+
+          const batch = new Map(pendingProgressRef.current);
+          pendingProgressRef.current.clear();
+
+          setQueue((prev) => {
+            let changed = false;
+            const next = prev.map((item) => {
+              const update = batch.get(item.id);
+              if (!update || item.status === 'cancelled' || item.status === 'completed') {
+                return item;
+              }
+              if (
+                item.status === 'in_progress' &&
+                item.percent === update.percent &&
+                item.bytes === update.bytes &&
+                item.speedBps === update.speedBps &&
+                item.etaSec === update.etaSec
+              ) {
+                return item;
+              }
+              changed = true;
+              return { ...item, ...update, status: 'in_progress' };
+            });
+            return changed ? next : prev;
+          });
+        });
+      }
     });
 
     peer.on('cancelled', async (info) => {
       if (cancelled) return;
+      pendingProgressRef.current.delete(info.id);
       console.log('[SessionPage] File cancelled event received:', info.id, info.name);
       setQueue((prev) =>
         prev.map((item) =>
@@ -151,6 +178,7 @@ export function SessionPage() {
 
     peer.on('file-complete', async (result) => {
       if (cancelled) return;
+      pendingProgressRef.current.delete(result.id);
       setQueue((prev) =>
         prev.map((item) =>
           item.id === result.id ? { ...item, ...result, status: 'completed' } : item
@@ -201,6 +229,11 @@ export function SessionPage() {
 
     return () => {
       cancelled = true;
+      if (progressRafRef.current) {
+        cancelAnimationFrame(progressRafRef.current);
+        progressRafRef.current = null;
+      }
+      pendingProgressRef.current.clear();
       peerRef.current = null;
       peer.close();
     };

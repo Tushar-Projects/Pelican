@@ -197,6 +197,11 @@ export class Peer extends EventEmitter {
 
     const pc = new RTCPeerConnection({ iceServers: this.iceServers });
 
+    // Dev only: expose the RTCPeerConnection as window.__pc
+    if (typeof window !== 'undefined') {
+      window.__pc = pc;
+    }
+
     pc.onicecandidate = (event) => {
       if (event.candidate) {
         this._sendSignaling({
@@ -207,7 +212,9 @@ export class Peer extends EventEmitter {
     };
 
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'failed') {
+      if (pc.connectionState === 'connected') {
+        this._logConnectionStats();
+      } else if (pc.connectionState === 'failed') {
         this._setStatus(PEER_STATUS.FAILED);
       } else if (pc.connectionState === 'disconnected') {
         this._setStatus(PEER_STATUS.DISCONNECTED);
@@ -216,6 +223,51 @@ export class Peer extends EventEmitter {
 
     this.pc = pc;
     return pc;
+  }
+
+  async _logConnectionStats() {
+    if (!this.pc || this._hasLoggedStats) return;
+
+    try {
+      // Brief wait to ensure nominated candidate pair stats are populated
+      await new Promise((r) => setTimeout(r, 300));
+      if (!this.pc || this._hasLoggedStats) return;
+
+      const stats = await this.pc.getStats();
+      let activePair = null;
+
+      stats.forEach((report) => {
+        if (
+          report.type === 'candidate-pair' &&
+          (report.selected || (report.nominated && report.state === 'succeeded'))
+        ) {
+          activePair = report;
+        }
+      });
+
+      if (!activePair) {
+        stats.forEach((report) => {
+          if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+            activePair = report;
+          }
+        });
+      }
+
+      if (activePair) {
+        this._hasLoggedStats = true;
+        const local = stats.get(activePair.localCandidateId);
+        const remote = stats.get(activePair.remoteCandidateId);
+        const localType = local?.candidateType || local?.type || 'unknown';
+        const remoteType = remote?.candidateType || remote?.type || 'unknown';
+        const rtt = activePair.currentRoundTripTime != null
+          ? `${(activePair.currentRoundTripTime * 1000).toFixed(1)} ms`
+          : (activePair.roundTripTime != null ? `${(activePair.roundTripTime * 1000).toFixed(1)} ms` : 'N/A');
+
+        console.log(`[WebRTC Stats] Selected candidate pair type: local=${localType}, remote=${remoteType} (${localType} <-> ${remoteType}) | RTT: ${rtt}`);
+      }
+    } catch (err) {
+      // non-fatal
+    }
   }
 
   async _startInitiatorHandshake() {
@@ -293,6 +345,7 @@ export class Peer extends EventEmitter {
 
     channel.onopen = () => {
       this._setStatus(PEER_STATUS.CONNECTED);
+      this._logConnectionStats();
     };
 
     channel.onclose = () => {
@@ -326,7 +379,10 @@ export class Peer extends EventEmitter {
     switch (msg.t) {
       case 'meta': {
         // Incoming file descriptor
-        const { id, name, size, mime, totalChunks } = msg;
+        const { id, name, size, mime, totalChunks, chunkSize: metaChunkSize } = msg;
+        const chunkSize = metaChunkSize || CHUNK_SIZE;
+        const expectedChunks = totalChunks || Math.max(1, Math.ceil(size / chunkSize));
+
         let transfer = this._transfers.get(id);
         if (!transfer) {
           transfer = {
@@ -349,22 +405,46 @@ export class Peer extends EventEmitter {
           return;
         }
 
+        // Support resume: check existing chunks and compute chunk offsets using chunkSize
+        const existingChunks = (this._incomingFile && this._incomingFile.id === id && this._incomingFile.chunks)
+          ? this._incomingFile.chunks
+          : null;
+        const have = [];
+        let receivedBytes = 0;
+        let chunks;
+
+        if (existingChunks && existingChunks.length === expectedChunks) {
+          chunks = existingChunks;
+          for (let i = 0; i < chunks.length; i++) {
+            if (chunks[i]) {
+              have.push(i);
+              const chunkOffset = i * chunkSize;
+              const chunkEnd = Math.min(size, chunkOffset + chunkSize);
+              receivedBytes += (chunkEnd - chunkOffset);
+            }
+          }
+        } else {
+          chunks = new Array(expectedChunks);
+        }
+
         this._incomingFile = {
           id,
           name,
           size,
           mime: mime || 'application/octet-stream',
-          totalChunks,
-          chunks: new Map(),
-          receivedBytes: 0,
+          chunkSize,
+          totalChunks: expectedChunks,
+          chunks, // Preallocated array by index per Req 4
+          receivedBytes,
           startTime: Date.now(),
+          lastProgressTime: 0,
           cancelled: false,
         };
 
         this.emit('incoming', { id, name, size });
 
-        // Acknowledge with ready message per Section 5
-        this._sendDataMessage(ControlMessages.ready(id, []));
+        // Acknowledge with ready message per Section 5, returning existing chunks for resume
+        this._sendDataMessage(ControlMessages.ready(id, have));
         break;
       }
 
@@ -452,9 +532,7 @@ export class Peer extends EventEmitter {
           transfer.size = transfer.size || this._incomingFile.size;
           transfer.direction = 'received';
           this._incomingFile.cancelled = true;
-          if (this._incomingFile.chunks) {
-            this._incomingFile.chunks.clear();
-          }
+          this._incomingFile.chunks = null;
           this._incomingFile = null;
         }
 
@@ -479,44 +557,45 @@ export class Peer extends EventEmitter {
     if (transfer && transfer.cancelled) return;
 
     const { chunkIndex, chunkData } = decodeBinaryFrame(buffer);
-    this._incomingFile.chunks.set(chunkIndex, chunkData);
-    this._incomingFile.receivedBytes += chunkData.byteLength;
 
+    // Store in preallocated array by index without copying or concatenating per Req 4
+    if (!this._incomingFile.chunks[chunkIndex]) {
+      this._incomingFile.chunks[chunkIndex] = chunkData;
+      this._incomingFile.receivedBytes += chunkData.byteLength;
+    }
+
+    // Throttle progress to at most once per 100 ms per file, always emit final 100%
     const now = Date.now();
-    const elapsedSec = Math.max(0.001, (now - this._incomingFile.startTime) / 1000);
-    const speedBps = Math.round(this._incomingFile.receivedBytes / elapsedSec);
-    const remainingBytes = Math.max(0, this._incomingFile.size - this._incomingFile.receivedBytes);
-    const etaSec = speedBps > 0 ? Math.round(remainingBytes / speedBps) : 0;
-    const percent = Math.min(
-      100,
-      Math.round((this._incomingFile.receivedBytes / this._incomingFile.size) * 100)
-    );
+    const isFinal = (this._incomingFile.receivedBytes >= this._incomingFile.size);
+    if (isFinal || (now - (this._incomingFile.lastProgressTime || 0) >= 100)) {
+      this._incomingFile.lastProgressTime = now;
+      const elapsedSec = Math.max(0.001, (now - this._incomingFile.startTime) / 1000);
+      const speedBps = Math.round(this._incomingFile.receivedBytes / elapsedSec);
+      const remainingBytes = Math.max(0, this._incomingFile.size - this._incomingFile.receivedBytes);
+      const etaSec = speedBps > 0 ? Math.round(remainingBytes / speedBps) : 0;
+      const percent = this._incomingFile.size > 0
+        ? Math.min(100, Math.round((this._incomingFile.receivedBytes / this._incomingFile.size) * 100))
+        : 100;
 
-    this.emit('progress', {
-      id: this._incomingFile.id,
-      name: this._incomingFile.name,
-      direction: 'received',
-      bytes: this._incomingFile.receivedBytes,
-      total: this._incomingFile.size,
-      percent,
-      speedBps,
-      etaSec,
-    });
+      this.emit('progress', {
+        id: this._incomingFile.id,
+        name: this._incomingFile.name,
+        direction: 'received',
+        bytes: this._incomingFile.receivedBytes,
+        total: this._incomingFile.size,
+        percent,
+        speedBps,
+        etaSec,
+      });
+    }
   }
 
   async _finalizeIncomingFile() {
     const fileInfo = this._incomingFile;
     if (!fileInfo) return;
 
-    const orderedChunks = [];
-    for (let i = 0; i < fileInfo.totalChunks; i++) {
-      const chunk = fileInfo.chunks.get(i);
-      if (chunk) {
-        orderedChunks.push(chunk);
-      }
-    }
-
-    const blob = new Blob(orderedChunks, { type: fileInfo.mime });
+    // fileInfo.chunks is already preallocated and filled in exact order
+    const blob = new Blob(fileInfo.chunks, { type: fileInfo.mime });
     let sha256 = null;
     try {
       sha256 = await calculateSha256(blob);
@@ -644,9 +723,9 @@ export class Peer extends EventEmitter {
       return;
     }
 
-    // 1. Send meta control message
+    // 1. Send meta control message with chunkSize per Req 1
     this._sendDataMessage(
-      ControlMessages.meta(fileId, fileName, file.size, mime, totalChunks)
+      ControlMessages.meta(fileId, fileName, file.size, mime, totalChunks, CHUNK_SIZE)
     );
 
     // 2. Wait for receiver's ready message
@@ -670,64 +749,89 @@ export class Peer extends EventEmitter {
 
     const startTime = Date.now();
     let bytesSent = 0;
+    let chunkIdx = 0;
+    let lastProgressTime = 0;
 
-    // 3. Send binary chunks with backpressure
-    for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
-      if (state.cancelled) {
-        break;
+    // 3. Send binary chunks with 4 MB block reads and backpressure
+    const BLOCK_SIZE = 4 * 1024 * 1024; // 4 MB
+
+    if (file.size === 0) {
+      if (!haveSet.has(0)) {
+        const frame = encodeBinaryFrame(0, new ArrayBuffer(0));
+        this.channel.send(frame);
       }
-
-      if (haveSet.has(chunkIdx)) {
-        // Chunk skipped per resume protocol
-        const start = chunkIdx * CHUNK_SIZE;
-        const end = Math.min(file.size, start + CHUNK_SIZE);
-        bytesSent += end - start;
-        continue;
-      }
-
-      const start = chunkIdx * CHUNK_SIZE;
-      const end = Math.min(file.size, start + CHUNK_SIZE);
-      const slice = file.slice(start, end);
-      const chunkBuffer = await slice.arrayBuffer();
-
-      if (state.cancelled) {
-        break;
-      }
-
-      const frame = encodeBinaryFrame(chunkIdx, chunkBuffer);
-
-      // Backpressure check: pause when bufferedAmount > 1048576 (1 MB)
-      if (this.channel && this.channel.bufferedAmount > BUFFERED_AMOUNT_HIGH_THRESHOLD) {
-        await this._waitForBufferDrain(state);
-        if (state.cancelled) {
-          break;
-        }
-      }
-
-      if (!this.channel || this.channel.readyState !== 'open') {
-        throw new Error('Data channel closed during transfer');
-      }
-
-      this.channel.send(frame);
-      bytesSent += chunkBuffer.byteLength;
-
-      const now = Date.now();
-      const elapsedSec = Math.max(0.001, (now - startTime) / 1000);
-      const speedBps = Math.round(bytesSent / elapsedSec);
-      const remainingBytes = Math.max(0, file.size - bytesSent);
-      const etaSec = speedBps > 0 ? Math.round(remainingBytes / speedBps) : 0;
-      const percent = Math.min(100, Math.round((bytesSent / file.size) * 100));
-
       this.emit('progress', {
         id: fileId,
         name: fileName,
         direction: 'sent',
-        bytes: bytesSent,
-        total: file.size,
-        percent,
-        speedBps,
-        etaSec,
+        bytes: 0,
+        total: 0,
+        percent: 100,
+        speedBps: 0,
+        etaSec: 0,
       });
+    } else {
+      for (let blockOffset = 0; blockOffset < file.size; blockOffset += BLOCK_SIZE) {
+        if (state.cancelled) break;
+
+        const blockEnd = Math.min(file.size, blockOffset + BLOCK_SIZE);
+        const blockSlice = file.slice(blockOffset, blockEnd);
+        const blockBuffer = await blockSlice.arrayBuffer();
+
+        if (state.cancelled) break;
+
+        for (let offsetInBlock = 0; offsetInBlock < blockBuffer.byteLength; offsetInBlock += CHUNK_SIZE) {
+          if (state.cancelled) break;
+
+          const currentChunkIdx = chunkIdx++;
+          const chunkLen = Math.min(CHUNK_SIZE, blockBuffer.byteLength - offsetInBlock);
+
+          if (haveSet.has(currentChunkIdx)) {
+            bytesSent += chunkLen;
+            continue;
+          }
+
+          // Cut CHUNK_SIZE chunk from blockBuffer without extra copy
+          const chunkView = new Uint8Array(blockBuffer, offsetInBlock, chunkLen);
+          const frame = encodeBinaryFrame(currentChunkIdx, chunkView);
+
+          // Backpressure check: pause when bufferedAmount > 8388608 (8 MB)
+          if (this.channel && this.channel.bufferedAmount > BUFFERED_AMOUNT_HIGH_THRESHOLD) {
+            await this._waitForBufferDrain(state);
+            if (state.cancelled) break;
+          }
+
+          if (!this.channel || this.channel.readyState !== 'open') {
+            throw new Error('Data channel closed during transfer');
+          }
+
+          this.channel.send(frame);
+          bytesSent += chunkLen;
+
+          // Throttle progress to at most once per 100 ms per file, always emit final 100%
+          const now = Date.now();
+          const isFinal = (bytesSent >= file.size);
+          if (isFinal || (now - lastProgressTime >= 100)) {
+            lastProgressTime = now;
+            const elapsedSec = Math.max(0.001, (now - startTime) / 1000);
+            const speedBps = Math.round(bytesSent / elapsedSec);
+            const remainingBytes = Math.max(0, file.size - bytesSent);
+            const etaSec = speedBps > 0 ? Math.round(remainingBytes / speedBps) : 0;
+            const percent = Math.min(100, Math.round((bytesSent / file.size) * 100));
+
+            this.emit('progress', {
+              id: fileId,
+              name: fileName,
+              direction: 'sent',
+              bytes: bytesSent,
+              total: file.size,
+              percent,
+              speedBps,
+              etaSec,
+            });
+          }
+        }
+      }
     }
 
     if (state.cancelled) {
@@ -816,9 +920,7 @@ export class Peer extends EventEmitter {
       state.size = state.size || this._incomingFile.size;
       state.direction = 'received';
       this._incomingFile.cancelled = true;
-      if (this._incomingFile.chunks) {
-        this._incomingFile.chunks.clear();
-      }
+      this._incomingFile.chunks = null;
       this._incomingFile = null;
     }
 
@@ -846,8 +948,8 @@ export class Peer extends EventEmitter {
       }
     }
 
-    if (this._incomingFile && this._incomingFile.chunks) {
-      this._incomingFile.chunks.clear();
+    if (this._incomingFile) {
+      this._incomingFile.chunks = null;
       this._incomingFile = null;
     }
 

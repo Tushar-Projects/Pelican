@@ -3,9 +3,9 @@
  * per CONTRACTS.md Section 5
  */
 
-export const CHUNK_SIZE = 16384; // 16 KB chunk size
-export const BUFFERED_AMOUNT_LOW_THRESHOLD = 262144; // 256 KB
-export const BUFFERED_AMOUNT_HIGH_THRESHOLD = 1048576; // 1 MB (pause sending)
+export const CHUNK_SIZE = 65536; // 64 KB chunk size
+export const BUFFERED_AMOUNT_LOW_THRESHOLD = 1048576; // 1 MB
+export const BUFFERED_AMOUNT_HIGH_THRESHOLD = 8388608; // 8 MB (pause sending)
 export const DATA_CHANNEL_LABEL = 'file';
 
 export const DEFAULT_ICE_SERVERS = [
