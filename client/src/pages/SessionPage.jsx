@@ -57,17 +57,10 @@ export function SessionPage() {
     if (errorMessage || !normalizedCode) return;
     let cancelled = false;
 
-    let wsUrl = import.meta.env.VITE_WS_URL;
-    if (
-      !wsUrl ||
-      (typeof window !== 'undefined' &&
-        window.location &&
-        wsUrl.includes('localhost') &&
-        window.location.hostname !== 'localhost' &&
-        window.location.hostname !== '127.0.0.1')
-    ) {
-      wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.hostname}:5000/ws`;
-    }
+    const rawWsUrl = (import.meta.env.VITE_WS_URL || '').trim();
+    const wsUrl = rawWsUrl || (typeof window !== 'undefined' && window.location
+      ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`
+      : 'ws://localhost:5000/ws');
 
     const iceServers = [];
     if (import.meta.env.VITE_STUN_URL) {

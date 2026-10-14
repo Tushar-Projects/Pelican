@@ -76,3 +76,31 @@
    ```bash
    npm run dev
    ```
+
+## Run with ngrok
+
+To expose the application externally using a single HTTPS tunnel (enabling WebRTC and secure context APIs over WAN / mobile devices):
+
+1. **Start the backend server** (port 5000):
+   ```bash
+   cd server
+   npm run dev
+   ```
+
+2. **Start the frontend client** (port 5173 with Vite dev proxy):
+   ```bash
+   cd client
+   npm run dev
+   ```
+   *Note: Vite dev server automatically proxies `/api` and `/ws` to `http://localhost:5000`.*
+
+3. **Start the ngrok tunnel pointing to Vite (port 5173)**:
+   ```bash
+   ngrok http 5173
+   ```
+
+4. **Access the app**:
+   - Open the provided HTTPS URL (e.g., `https://<subdomain>.ngrok-free.app`).
+   - The single-origin setup routes all API requests (`/api/*`) and WebSocket signaling (`wss://.../ws`) seamlessly through the tunnel with full HTTPS/WSS encryption.
+   - The server CORS and WebSocket signaling automatically allow connections from all `.ngrok-free.app`, `.ngrok-free.dev`, `.ngrok.app`, and `.ngrok.io` domains.
+

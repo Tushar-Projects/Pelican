@@ -12,17 +12,37 @@ import { attachSignaling } from './signaling/index.js';
 const app = express();
 
 const clientOrigin = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+const ngrokSuffixes = ['.ngrok-free.app', '.ngrok-free.dev', '.ngrok.app', '.ngrok.io'];
+
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  if (origin === clientOrigin) return true;
+
+  // Localhost and LAN IPs
+  if (/^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/.test(origin)) {
+    return true;
+  }
+
+  // ngrok origins (.ngrok-free.app, .ngrok-free.dev, .ngrok.app, .ngrok.io)
+  try {
+    const { hostname } = new URL(origin);
+    if (ngrokSuffixes.some((suffix) => hostname.endsWith(suffix) || hostname === suffix.slice(1))) {
+      return true;
+    }
+  } catch (e) {
+    // Malformed origin URL
+  }
+
+  return false;
+}
+
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (
-        !origin ||
-        origin === clientOrigin ||
-        /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/.test(origin)
-      ) {
+      if (isAllowedOrigin(origin)) {
         return callback(null, true);
       }
-      return callback(null, true);
+      return callback(new Error(`Origin ${origin} not allowed by CORS`));
     },
     credentials: true,
   })

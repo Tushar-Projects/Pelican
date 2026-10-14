@@ -21,7 +21,7 @@ export class Peer extends EventEmitter {
     this.code = (code || '').trim().toUpperCase();
     this.deviceName = (deviceName || 'Web Client').trim();
     this.wsUrl = wsUrl || (typeof window !== 'undefined' && window.location
-      ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.hostname}:5000/ws`
+      ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`
       : 'ws://localhost:5000/ws');
     this.iceServers = iceServers || DEFAULT_ICE_SERVERS;
 
