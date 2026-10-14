@@ -54,9 +54,17 @@ export function SessionPage() {
   useEffect(() => {
     if (errorMessage) return;
 
-    const wsUrl =
-      import.meta.env.VITE_WS_URL ||
-      `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.hostname}:5000/ws`;
+    let wsUrl = import.meta.env.VITE_WS_URL;
+    if (
+      !wsUrl ||
+      (typeof window !== 'undefined' &&
+        window.location &&
+        wsUrl.includes('localhost') &&
+        window.location.hostname !== 'localhost' &&
+        window.location.hostname !== '127.0.0.1')
+    ) {
+      wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.hostname}:5000/ws`;
+    }
 
     const iceServers = [];
     if (import.meta.env.VITE_STUN_URL) {

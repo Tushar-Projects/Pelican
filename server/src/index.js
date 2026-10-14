@@ -12,7 +12,21 @@ import { attachSignaling } from './signaling/index.js';
 const app = express();
 
 const clientOrigin = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
-app.use(cors({ origin: clientOrigin }));
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (
+        !origin ||
+        origin === clientOrigin ||
+        /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/.test(origin)
+      ) {
+        return callback(null, true);
+      }
+      return callback(null, true);
+    },
+    credentials: true,
+  })
+);
 app.use(express.json());
 
 // Mount API routes at /api
