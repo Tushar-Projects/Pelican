@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import { ArrowDownLeft, ArrowUpRight, Trash2 } from 'lucide-react';
 import { getTransfers, deleteTransfer, clearAllTransfers } from '../api/transfers.js';
 import { useAuth } from '../context/AuthContext.jsx';
-import { Link } from 'react-router-dom';
+import ConfirmDialog from '../components/ConfirmDialog.jsx';
 
 function formatBytes(bytes) {
   if (!bytes || bytes === 0) return '0 B';
@@ -14,6 +16,19 @@ function formatBytes(bytes) {
 function formatSpeed(bps) {
   if (!bps || bps === 0) return '0 B/s';
   return `${formatBytes(bps)}/s`;
+}
+
+function getStatusBadgeClass(status) {
+  switch (status) {
+    case 'completed':
+      return 'badge-ok';
+    case 'failed':
+      return 'badge-bad';
+    case 'cancelled':
+      return 'badge-muted';
+    default:
+      return 'badge-muted';
+  }
 }
 
 export function HistoryPage() {
@@ -31,6 +46,14 @@ export function HistoryPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
+
+  // Confirmation dialogs
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [deleteTargetId, setDeleteTargetId] = useState(null);
+
+  useEffect(() => {
+    document.title = 'History - Pelican';
+  }, []);
 
   const fetchHistory = async () => {
     try {
@@ -67,35 +90,36 @@ export function HistoryPage() {
     fetchHistory();
   };
 
-  const handleDeleteItem = async (id) => {
-    if (!window.confirm('Delete this transfer log?')) return;
+  const confirmDeleteItem = async () => {
+    if (!deleteTargetId) return;
     try {
-      await deleteTransfer(id);
-      setItems((prev) => prev.filter((item) => item._id !== id));
+      await deleteTransfer(deleteTargetId);
+      setItems((prev) => prev.filter((item) => item._id !== deleteTargetId));
       setTotal((prev) => Math.max(0, prev - 1));
     } catch (err) {
-      alert(err.message || 'Failed to delete record');
+      setError(err.message || 'Failed to delete record');
+    } finally {
+      setDeleteTargetId(null);
     }
   };
 
-  const handleClearAll = async () => {
-    if (!window.confirm('Clear your entire transfer history? This cannot be undone.')) return;
+  const confirmClearAll = async () => {
     try {
       await clearAllTransfers();
       setItems([]);
       setTotal(0);
     } catch (err) {
-      alert(err.message || 'Failed to clear transfer history');
+      setError(err.message || 'Failed to clear transfer history');
     }
   };
 
   if (!isAuthenticated) {
     return (
       <div className="auth-required-view">
-        <h2>Authentication Required</h2>
-        <p>Please log in to view your transfer logs and history.</p>
-        <Link to="/login" className="btn-primary mt-4">
-          Log In
+        <h2 className="auth-required-title">Authentication required</h2>
+        <p className="auth-required-text">Please log in to view your transfer logs and history.</p>
+        <Link to="/login" className="btn btn-primary">
+          Log in
         </Link>
       </div>
     );
@@ -104,29 +128,40 @@ export function HistoryPage() {
   const totalPages = Math.ceil(total / limit) || 1;
 
   return (
-    <div className="history-page">
+    <div className="history-layout">
       <div className="history-header">
-        <div>
-          <h1 className="page-title">Transfer History</h1>
-          <p className="page-subtitle">Track and audit your sent and received files ({total} records)</p>
+        <div className="history-title-group">
+          <h1 className="history-title">Transfer history</h1>
+          <p className="history-subtitle">
+            Track and audit your sent and received files ({total} {total === 1 ? 'record' : 'records'})
+          </p>
         </div>
         {items.length > 0 && (
-          <button onClick={handleClearAll} className="btn-danger btn-sm">
-            Clear All History
+          <button
+            type="button"
+            onClick={() => setShowClearConfirm(true)}
+            className="btn btn-danger btn-sm"
+          >
+            Clear all history
           </button>
         )}
       </div>
 
-      {error && <div className="alert alert-error">{error}</div>}
+      {error && (
+        <div className="alert alert-error" role="alert">
+          {error}
+        </div>
+      )}
 
       {/* Filter Bar */}
-      <form onSubmit={handleSearchSubmit} className="filter-bar">
+      <form onSubmit={handleSearchSubmit} className="history-filter-bar">
         <input
           type="text"
           placeholder="Search by file, session, or device..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="text-input filter-search"
+          className="input-text filter-search-input"
+          aria-label="Search transfers"
         />
 
         <select
@@ -135,9 +170,10 @@ export function HistoryPage() {
             setStatusFilter(e.target.value);
             setPage(1);
           }}
-          className="select-input"
+          className="select-input filter-status-select"
+          aria-label="Filter by status"
         >
-          <option value="">All Statuses</option>
+          <option value="">All statuses</option>
           <option value="completed">Completed</option>
           <option value="failed">Failed</option>
           <option value="cancelled">Cancelled</option>
@@ -147,24 +183,26 @@ export function HistoryPage() {
           type="date"
           value={fromDate}
           onChange={(e) => setFromDate(e.target.value)}
-          className="date-input"
+          className="date-input filter-date-input"
           title="From date"
+          aria-label="From date"
         />
 
         <input
           type="date"
           value={toDate}
           onChange={(e) => setToDate(e.target.value)}
-          className="date-input"
+          className="date-input filter-date-input"
           title="To date"
+          aria-label="To date"
         />
 
-        <button type="submit" className="btn-primary btn-sm">
+        <button type="submit" className="btn btn-primary btn-sm filter-btn">
           Filter
         </button>
       </form>
 
-      {/* Results Table */}
+      {/* Results Content */}
       {loading ? (
         <div className="loading-state">Loading transfer history...</div>
       ) : items.length === 0 ? (
@@ -172,86 +210,195 @@ export function HistoryPage() {
           <p>No transfer records found.</p>
         </div>
       ) : (
-        <div className="table-responsive">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Direction</th>
-                <th>File Name</th>
-                <th>Size</th>
-                <th>Session</th>
-                <th>Device</th>
-                <th>Status</th>
-                <th>Speed</th>
-                <th>Date</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => (
-                <tr key={item._id}>
-                  <td>
-                    <span
-                      className={`direction-badge ${
-                        item.direction === 'received' ? 'badge-received' : 'badge-sent'
-                      }`}
-                    >
-                      {item.direction === 'received' ? '📥 Recv' : '📤 Sent'}
-                    </span>
-                  </td>
-                  <td className="font-medium" title={item.fileName}>
-                    {item.fileName}
-                  </td>
-                  <td>{formatBytes(item.fileSize)}</td>
-                  <td>
-                    <code className="session-code-tag">{item.sessionCode}</code>
-                  </td>
-                  <td>{item.deviceName || '—'}</td>
-                  <td>
-                    <span className={`status-pill status-${item.status}`}>
-                      {item.status}
-                    </span>
-                  </td>
-                  <td>{formatSpeed(item.avgSpeedBps)}</td>
-                  <td>{new Date(item.createdAt).toLocaleString()}</td>
-                  <td>
-                    <button
-                      onClick={() => handleDeleteItem(item._id)}
-                      className="btn-text-danger"
-                      title="Delete record"
-                    >
-                      🗑
-                    </button>
-                  </td>
+        <>
+          {/* Desktop Table (>= 768px) */}
+          <div className="history-desktop-table">
+            <table className="history-table">
+              <thead>
+                <tr>
+                  <th scope="col">Direction</th>
+                  <th scope="col">File name</th>
+                  <th scope="col">Size</th>
+                  <th scope="col">Session</th>
+                  <th scope="col">Device</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Speed</th>
+                  <th scope="col">Date</th>
+                  <th scope="col">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {items.map((item) => (
+                  <tr key={item._id}>
+                    <td>
+                      <span
+                        className={`badge ${
+                          item.direction === 'received' ? 'badge-ok' : 'badge-accent'
+                        }`}
+                      >
+                        {item.direction === 'received' ? (
+                          <>
+                            <ArrowDownLeft size={12} strokeWidth={1.5} aria-hidden="true" />
+                            <span>Received</span>
+                          </>
+                        ) : (
+                          <>
+                            <ArrowUpRight size={12} strokeWidth={1.5} aria-hidden="true" />
+                            <span>Sent</span>
+                          </>
+                        )}
+                      </span>
+                    </td>
+                    <td className="history-filename" title={item.fileName}>
+                      {item.fileName}
+                    </td>
+                    <td className="font-mono">{formatBytes(item.fileSize)}</td>
+                    <td>
+                      <span className="history-session-tag">{item.sessionCode}</span>
+                    </td>
+                    <td>{item.deviceName || '—'}</td>
+                    <td>
+                      <span className={`badge ${getStatusBadgeClass(item.status)}`}>
+                        {item.status}
+                      </span>
+                    </td>
+                    <td className="font-mono">{formatSpeed(item.avgSpeedBps)}</td>
+                    <td className="font-mono">
+                      {new Date(item.createdAt).toLocaleDateString([], {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                      })}
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteTargetId(item._id)}
+                        className="btn btn-ghost btn-sm"
+                        title="Delete record"
+                        aria-label={`Delete transfer record for ${item.fileName}`}
+                      >
+                        <Trash2 size={14} strokeWidth={1.5} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile Stacked List (< 768px) */}
+          <div className="history-mobile-list" role="list">
+            {items.map((item) => (
+              <article key={item._id} className="history-mobile-card" role="listitem">
+                <div className="history-mobile-top">
+                  <span
+                    className={`badge ${
+                      item.direction === 'received' ? 'badge-ok' : 'badge-accent'
+                    }`}
+                  >
+                    {item.direction === 'received' ? (
+                      <>
+                        <ArrowDownLeft size={12} strokeWidth={1.5} aria-hidden="true" />
+                        <span>Received</span>
+                      </>
+                    ) : (
+                      <>
+                        <ArrowUpRight size={12} strokeWidth={1.5} aria-hidden="true" />
+                        <span>Sent</span>
+                      </>
+                    )}
+                  </span>
+                  <span className={`badge ${getStatusBadgeClass(item.status)}`}>
+                    {item.status}
+                  </span>
+                </div>
+
+                <div className="history-mobile-file">{item.fileName}</div>
+
+                <div className="history-mobile-meta font-mono">
+                  <span>{formatBytes(item.fileSize)}</span>
+                  <span>•</span>
+                  <span>Code: {item.sessionCode}</span>
+                  {item.deviceName && (
+                    <>
+                      <span>•</span>
+                      <span>{item.deviceName}</span>
+                    </>
+                  )}
+                  {item.avgSpeedBps > 0 && (
+                    <>
+                      <span>•</span>
+                      <span>{formatSpeed(item.avgSpeedBps)}</span>
+                    </>
+                  )}
+                  <span>•</span>
+                  <span>{new Date(item.createdAt).toLocaleDateString()}</span>
+                </div>
+
+                <div className="history-mobile-actions">
+                  <button
+                    type="button"
+                    onClick={() => setDeleteTargetId(item._id)}
+                    className="btn btn-secondary btn-sm"
+                    aria-label={`Delete transfer record for ${item.fileName}`}
+                  >
+                    <Trash2 size={14} strokeWidth={1.5} />
+                    <span>Delete</span>
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </>
       )}
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="pagination">
+        <div className="pagination-bar">
           <button
+            type="button"
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page === 1}
-            className="btn-secondary btn-sm"
+            className="btn btn-secondary btn-sm"
           >
-            ← Previous
+            Previous
           </button>
-          <span className="pagination-text">
+          <span className="pagination-info font-mono">
             Page {page} of {totalPages}
           </span>
           <button
+            type="button"
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={page === totalPages}
-            className="btn-secondary btn-sm"
+            className="btn btn-secondary btn-sm"
           >
-            Next →
+            Next
           </button>
         </div>
       )}
+
+      {/* Clear All Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showClearConfirm}
+        onClose={() => setShowClearConfirm(false)}
+        onConfirm={confirmClearAll}
+        title="Clear all history"
+        message="Are you sure you want to delete all transfer logs? This action cannot be undone."
+        confirmText="Clear all"
+        danger={true}
+      />
+
+      {/* Single Item Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={Boolean(deleteTargetId)}
+        onClose={() => setDeleteTargetId(null)}
+        onConfirm={confirmDeleteItem}
+        title="Delete transfer record"
+        message="Are you sure you want to delete this transfer log?"
+        confirmText="Delete"
+        danger={true}
+      />
     </div>
   );
 }

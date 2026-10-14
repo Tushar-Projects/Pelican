@@ -11,6 +11,7 @@ import StatusBadge from '../components/StatusBadge.jsx';
 import DropZone from '../components/DropZone.jsx';
 import TransferQueue from '../components/TransferQueue.jsx';
 import QrCodeModal from '../components/QrCodeModal.jsx';
+import ConfirmDialog from '../components/ConfirmDialog.jsx';
 
 function getFriendlyError(msg) {
   if (!msg) return 'This session has expired or does not exist.';
@@ -40,6 +41,7 @@ export function SessionPage() {
   const [errorMessage, setErrorMessage] = useState(null);
   const [isExtending, setIsExtending] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
 
   // Device name handling
   const [deviceName, setPeerDeviceName] = useState(() => getDeviceName('Web Client'));
@@ -520,7 +522,7 @@ export function SessionPage() {
               </button>
               <button
                 type="button"
-                onClick={handleCloseSession}
+                onClick={() => setShowCloseConfirm(true)}
                 className="btn btn-danger btn-sm"
               >
                 Close session
@@ -566,6 +568,16 @@ export function SessionPage() {
         code={normalizedCode}
         isOpen={showQrModal}
         onClose={() => setShowQrModal(false)}
+      />
+
+      <ConfirmDialog
+        isOpen={showCloseConfirm}
+        onClose={() => setShowCloseConfirm(false)}
+        onConfirm={handleCloseSession}
+        title="Close session"
+        message="Are you sure you want to end this transfer session? Any connected peer will be disconnected."
+        confirmText="Close session"
+        danger={true}
       />
     </div>
   );
