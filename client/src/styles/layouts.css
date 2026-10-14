@@ -106,6 +106,14 @@
   text-decoration: none;
 }
 
+@media (pointer: coarse) {
+  .nav-link {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+}
+
 .nav-actions {
   display: flex;
   align-items: center;

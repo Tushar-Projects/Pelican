@@ -17,7 +17,7 @@
   white-space: nowrap;
 }
 
-@media (max-width: 767px) {
+@media (pointer: coarse) {
   .btn {
     min-height: 44px;
     padding: var(--sp-3) var(--sp-4);
@@ -75,7 +75,7 @@
   border-radius: var(--r-md);
 }
 
-@media (max-width: 767px) {
+@media (pointer: coarse) {
   .btn-icon {
     min-height: 44px;
     min-width: 44px;
@@ -88,9 +88,10 @@
   min-height: 32px;
 }
 
-@media (max-width: 767px) {
+@media (pointer: coarse) {
   .btn-sm {
     min-height: 44px;
+    padding: var(--sp-2) var(--sp-4);
   }
 }
 
@@ -133,11 +134,18 @@
   transition: border-color var(--transition-fast);
 }
 
-@media (max-width: 767px) {
+@media (pointer: coarse) {
   .input-text,
   .select-input,
   .date-input {
     min-height: 44px;
+  }
+}
+
+@media (max-width: 767px) {
+  .input-text,
+  .select-input,
+  .date-input {
     font-size: 16px !important;
   }
 }

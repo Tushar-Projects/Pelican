@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 
@@ -11,6 +11,10 @@ export function RegisterPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    document.title = 'Create account - Pelican';
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -32,71 +36,80 @@ export function RegisterPage() {
   };
 
   return (
-    <div className="auth-page">
+    <div className="auth-container">
       <div className="auth-card">
-        <h2 className="auth-title">Create Account</h2>
-        <p className="auth-subtitle">Join DropRelay to sync trusted devices and history</p>
+        <div className="auth-header">
+          <h1 className="auth-title">Create account</h1>
+          <p className="auth-subtitle">Save transfer history and trusted devices</p>
+        </div>
 
-        {error && <div className="alert alert-error">{error}</div>}
+        {error && (
+          <div className="alert alert-error" role="alert">
+            {error}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="auth-form">
           <div className="form-group">
-            <label className="input-label" htmlFor="name">
-              Full Name
+            <label className="input-label" htmlFor="nameInput">
+              Full name
             </label>
             <input
-              id="name"
+              id="nameInput"
               type="text"
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="text-input"
+              className="input-text"
               placeholder="Alice Johnson"
+              autoComplete="name"
             />
           </div>
 
           <div className="form-group">
-            <label className="input-label" htmlFor="email">
-              Email Address
+            <label className="input-label" htmlFor="emailInput">
+              Email address
             </label>
             <input
-              id="email"
+              id="emailInput"
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="text-input"
+              className="input-text"
               placeholder="alice@example.com"
+              autoComplete="email"
             />
           </div>
 
           <div className="form-group">
-            <label className="input-label" htmlFor="password">
+            <label className="input-label" htmlFor="passwordInput">
               Password (min. 6 characters)
             </label>
             <input
-              id="password"
+              id="passwordInput"
               type="password"
               required
               minLength={6}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="text-input"
+              className="input-text"
               placeholder="••••••••"
+              autoComplete="new-password"
             />
           </div>
 
           <button
             type="submit"
             disabled={isSubmitting}
-            className="btn-primary btn-block btn-lg"
+            className="btn btn-primary btn-block btn-lg"
           >
-            {isSubmitting ? 'Creating Account...' : 'Register'}
+            {isSubmitting ? 'Creating account...' : 'Create account'}
           </button>
         </form>
 
         <p className="auth-switch">
-          Already have an account? <Link to="/login">Log in here</Link>
+          Already have an account? <Link to="/login">Log in</Link>
         </p>
       </div>
     </div>

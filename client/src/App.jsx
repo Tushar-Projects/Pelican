@@ -7,6 +7,7 @@ import HistoryPage from './pages/HistoryPage.jsx';
 import DevicesPage from './pages/DevicesPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import RegisterPage from './pages/RegisterPage.jsx';
+import NotFoundPage from './pages/NotFoundPage.jsx';
 
 export function App() {
   return (
@@ -20,6 +21,7 @@ export function App() {
           <Route path="/devices" element={<DevicesPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </main>
       <footer className="app-footer">
