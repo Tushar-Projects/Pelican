@@ -12,7 +12,7 @@ export function App() {
   return (
     <div className="app-shell">
       <Navbar />
-      <main className="main-content">
+      <main className="app-main">
         <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/session/:code" element={<SessionPage />} />
@@ -22,8 +22,8 @@ export function App() {
           <Route path="/register" element={<RegisterPage />} />
         </Routes>
       </main>
-      <footer className="footer">
-        <p>DropRelay – Direct WebRTC P2P Transfer • Fully encrypted & zero server file storage</p>
+      <footer className="app-footer">
+        <p>Files go directly between devices. Nothing is stored on our server.</p>
       </footer>
     </div>
   );

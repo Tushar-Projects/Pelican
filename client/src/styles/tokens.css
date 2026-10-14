@@ -1,0 +1,134 @@
+@import '@fontsource-variable/schibsted-grotesk';
+@import '@fontsource/jetbrains-mono';
+
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* Backgrounds */
+  --color-bg-page: #FAFAF9;
+  --color-bg-surface: #FFFFFF;
+  --color-bg-inset: #F5F5F4;
+
+  /* Borders */
+  --color-border: #E7E5E4;
+  --color-border-emphasis: #D6D3D1;
+  --color-border-input: #8A847E;
+
+  /* Text */
+  --color-text-1: #1C1917;
+  --color-text-2: #57534E;
+  --color-text-3: #68625D;
+
+  /* Brand / Accent */
+  --color-accent: #C2410C;
+  --color-accent-hover: #9A3412;
+  --color-accent-subtle: rgba(194, 65, 12, 0.08);
+  --color-accent-text: #FFFFFF;
+
+  /* Status Colors */
+  --color-ok: #166534;
+  --color-ok-bg: #DCFCE7;
+  --color-warn: #854D0E;
+  --color-warn-bg: #FEF9C3;
+  --color-bad: #B91C1C;
+  --color-bad-bg: #FEE2E2;
+
+  /* Destructive Actions */
+  --color-bad-button: #B91C1C;
+  --color-bad-button-hover: #991B1B;
+  --color-bad-text: #FFFFFF;
+
+  /* Shadows */
+  --shadow-modal: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Backgrounds */
+  --color-bg-page: #1C1917;
+  --color-bg-surface: #292524;
+  --color-bg-inset: #44403C;
+
+  /* Borders */
+  --color-border: #44403C;
+  --color-border-emphasis: #57534E;
+  --color-border-input: #78716C;
+
+  /* Text */
+  --color-text-1: #FAFAF9;
+  --color-text-2: #D6D3D1;
+  --color-text-3: #B8B2AD;
+
+  /* Brand / Accent */
+  --color-accent: #FB923C;
+  --color-accent-hover: #F97316;
+  --color-accent-subtle: rgba(251, 146, 60, 0.10);
+  --color-accent-text: #1C1917;
+
+  /* Status Colors */
+  --color-ok: #86EFAC;
+  --color-ok-bg: #143823;
+  --color-warn: #FDE047;
+  --color-warn-bg: #3B3314;
+  --color-bad: #FCA5A5;
+  --color-bad-bg: #3E1C1C;
+
+  /* Destructive Actions */
+  --color-bad-button: #F87171;
+  --color-bad-button-hover: #EF4444;
+  --color-bad-text: #1C1917;
+
+  /* Shadows */
+  --shadow-modal: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+:root {
+  /* Typography */
+  --font-sans: 'Schibsted Grotesk Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Type Scale */
+  --t-xs: 0.75rem;    /* 12px min */
+  --t-sm: 0.8125rem;  /* 13px */
+  --t-base: 0.875rem; /* 14px */
+  --t-md: 1rem;       /* 16px */
+  --t-lg: 1.125rem;   /* 18px */
+  --t-xl: 1.375rem;   /* 22px */
+  --t-2xl: 1.75rem;   /* 28px */
+
+  /* Spacing Grid (4px) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+
+  /* Radii */
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 8px;
+
+  /* Transitions */
+  --transition-fast: 150ms ease;
+
+  /* Compatibility aliases for screens transitioning to new design system */
+  --bg-main: var(--color-bg-page);
+  --bg-card: var(--color-bg-surface);
+  --bg-card-hover: var(--color-bg-inset);
+  --bg-input: var(--color-bg-surface);
+  --border: var(--color-border);
+  --text-main: var(--color-text-1);
+  --text-muted: var(--color-text-2);
+  --primary: var(--color-accent);
+  --primary-hover: var(--color-accent-hover);
+  --success: var(--color-ok);
+  --warning: var(--color-warn);
+  --danger: var(--color-bad);
+}
