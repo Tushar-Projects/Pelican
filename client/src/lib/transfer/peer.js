@@ -39,6 +39,7 @@ export class Peer extends EventEmitter {
     this._readyResolvers = new Map(); // fileId -> resolve
     this._doneResolvers = new Map(); // fileId -> resolve
 
+    this._closed = false;
     this._incomingFile = null;
     this._isSending = false;
     this._sendQueue = [];
@@ -47,6 +48,7 @@ export class Peer extends EventEmitter {
   }
 
   _setStatus(newStatus) {
+    if (this._closed && newStatus !== PEER_STATUS.DISCONNECTED) return;
     if (this.status !== newStatus) {
       this.status = newStatus;
       this.emit('status', newStatus);
@@ -59,12 +61,20 @@ export class Peer extends EventEmitter {
     try {
       this.ws = new WebSocket(this.wsUrl);
     } catch (err) {
-      this.emit('error', { code: 'WS_CONNECTION_ERROR', message: err.message });
-      this._setStatus(PEER_STATUS.FAILED);
+      if (!this._closed) {
+        this.emit('error', { code: 'WS_CONNECTION_ERROR', message: err.message });
+        this._setStatus(PEER_STATUS.FAILED);
+      }
       return;
     }
 
     this.ws.onopen = () => {
+      if (this._closed) {
+        try {
+          this.ws.close();
+        } catch (e) {}
+        return;
+      }
       this._sendSignaling({
         type: 'join',
         code: this.code,
@@ -73,6 +83,7 @@ export class Peer extends EventEmitter {
     };
 
     this.ws.onmessage = async (event) => {
+      if (this._closed) return;
       let msg;
       try {
         msg = JSON.parse(event.data);
@@ -84,12 +95,14 @@ export class Peer extends EventEmitter {
     };
 
     this.ws.onclose = () => {
+      if (this._closed) return;
       if (this.status !== PEER_STATUS.DISCONNECTED && this.status !== PEER_STATUS.FAILED) {
         this._setStatus(PEER_STATUS.DISCONNECTED);
       }
     };
 
     this.ws.onerror = (err) => {
+      if (this._closed) return;
       this.emit('error', {
         code: 'WS_ERROR',
         message: err.message || 'WebSocket connection error',
@@ -99,6 +112,7 @@ export class Peer extends EventEmitter {
   }
 
   _sendSignaling(data) {
+    if (this._closed) return;
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(data));
     }
@@ -606,6 +620,8 @@ export class Peer extends EventEmitter {
   }
 
   close() {
+    this._closed = true;
+
     this._sendSignaling({ type: 'leave' });
 
     if (this.channel) {
@@ -620,12 +636,23 @@ export class Peer extends EventEmitter {
     this._cleanupPeerConnection();
 
     if (this.ws) {
-      try {
-        this.ws.close();
-      } catch (err) {
-        // ignore
-      }
+      const socket = this.ws;
       this.ws = null;
+      if (typeof WebSocket !== 'undefined' && socket.readyState === WebSocket.CONNECTING) {
+        socket.onopen = () => {
+          try {
+            socket.close();
+          } catch (err) {
+            // ignore
+          }
+        };
+      } else {
+        try {
+          socket.close();
+        } catch (err) {
+          // ignore
+        }
+      }
     }
 
     this._setStatus(PEER_STATUS.DISCONNECTED);

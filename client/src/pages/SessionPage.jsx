@@ -50,9 +50,12 @@ export function SessionPage() {
     };
   }, [normalizedCode]);
 
-  // 2. Initialize Peer connection
+  const remoteDeviceNameRef = useRef(null);
+
+  // 2. Initialize Peer connection (StrictMode-safe)
   useEffect(() => {
-    if (errorMessage) return;
+    if (errorMessage || !normalizedCode) return;
+    let cancelled = false;
 
     let wsUrl = import.meta.env.VITE_WS_URL;
     if (
@@ -88,14 +91,18 @@ export function SessionPage() {
     peerRef.current = peer;
 
     peer.on('status', (s) => {
+      if (cancelled) return;
       setPeerStatus(s);
     });
 
     peer.on('peer', ({ deviceName: rDevice }) => {
+      if (cancelled) return;
+      remoteDeviceNameRef.current = rDevice;
       setRemoteDeviceName(rDevice);
     });
 
     peer.on('incoming', ({ id, name, size }) => {
+      if (cancelled) return;
       setQueue((prev) => [
         {
           id,
@@ -112,6 +119,7 @@ export function SessionPage() {
     });
 
     peer.on('progress', (progress) => {
+      if (cancelled) return;
       setQueue((prev) =>
         prev.map((item) =>
           item.id === progress.id ? { ...item, ...progress, status: 'in_progress' } : item
@@ -120,6 +128,7 @@ export function SessionPage() {
     });
 
     peer.on('file-complete', async (result) => {
+      if (cancelled) return;
       setQueue((prev) =>
         prev.map((item) =>
           item.id === result.id ? { ...item, ...result, status: 'completed' } : item
@@ -131,7 +140,7 @@ export function SessionPage() {
         try {
           await recordTransfer({
             sessionCode: normalizedCode,
-            deviceName: remoteDeviceName || 'Remote Device',
+            deviceName: remoteDeviceNameRef.current || 'Remote Device',
             fileName: result.name,
             fileSize: result.size,
             direction: result.direction,
@@ -147,12 +156,13 @@ export function SessionPage() {
     });
 
     peer.on('error', async (err) => {
+      if (cancelled) return;
       setErrorMessage(err.message || 'Transfer error occurred');
       if (isAuthenticated) {
         try {
           await recordTransfer({
             sessionCode: normalizedCode,
-            deviceName: remoteDeviceName || 'Remote Device',
+            deviceName: remoteDeviceNameRef.current || 'Remote Device',
             fileName: 'Transfer',
             fileSize: 0,
             direction: 'sent',
@@ -168,11 +178,11 @@ export function SessionPage() {
     });
 
     return () => {
-      if (peerRef.current) {
-        peerRef.current.close();
-      }
+      cancelled = true;
+      peerRef.current = null;
+      peer.close();
     };
-  }, [normalizedCode, deviceName, isAuthenticated, remoteDeviceName]);
+  }, [normalizedCode, deviceName, isAuthenticated]);
 
   const handleFilesSelected = async (files) => {
     if (!peerRef.current || peerStatus !== 'connected') return;
