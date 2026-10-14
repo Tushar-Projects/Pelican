@@ -416,11 +416,12 @@ export class Peer extends EventEmitter {
     }
 
     const blob = new Blob(orderedChunks, { type: fileInfo.mime });
-    let sha256 = '';
+    let sha256 = null;
     try {
       sha256 = await calculateSha256(blob);
     } catch (err) {
-      sha256 = '';
+      console.warn('Failed to calculate SHA-256 for received file:', err);
+      sha256 = null;
     }
 
     // Report hash back to sender per Section 5
@@ -436,7 +437,7 @@ export class Peer extends EventEmitter {
       direction: 'received',
       durationMs,
       avgSpeedBps,
-      sha256,
+      sha256: sha256 || null,
       blob,
     });
 
@@ -591,7 +592,7 @@ export class Peer extends EventEmitter {
       direction: 'sent',
       durationMs,
       avgSpeedBps,
-      sha256: doneMsg.sha256 || '',
+      sha256: doneMsg?.sha256 || null,
     });
   }
 
