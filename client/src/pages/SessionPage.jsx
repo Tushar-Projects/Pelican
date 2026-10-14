@@ -103,6 +103,7 @@ export function SessionPage() {
 
     peer.on('incoming', ({ id, name, size }) => {
       if (cancelled) return;
+      console.log('[SessionPage] incoming file:', id, name);
       setQueue((prev) => [
         {
           id,
@@ -122,9 +123,41 @@ export function SessionPage() {
       if (cancelled) return;
       setQueue((prev) =>
         prev.map((item) =>
-          item.id === progress.id ? { ...item, ...progress, status: 'in_progress' } : item
+          item.id === progress.id
+            ? item.status === 'cancelled'
+              ? item
+              : { ...item, ...progress, status: 'in_progress' }
+            : item
         )
       );
+    });
+
+    peer.on('cancelled', async (info) => {
+      if (cancelled) return;
+      console.log('[SessionPage] File cancelled event received:', info.id, info.name);
+      setQueue((prev) =>
+        prev.map((item) =>
+          item.id === info.id ? { ...item, status: 'cancelled', error: 'Cancelled' } : item
+        )
+      );
+
+      if (isAuthenticated) {
+        try {
+          await recordTransfer({
+            sessionCode: normalizedCode,
+            deviceName: remoteDeviceNameRef.current || 'Remote Device',
+            fileName: info.name || 'Transfer',
+            fileSize: info.size || 0,
+            direction: info.direction || 'sent',
+            status: 'cancelled',
+            avgSpeedBps: 0,
+            durationMs: 0,
+            sha256: '',
+          });
+        } catch (saveErr) {
+          console.warn('Failed to save cancelled transfer history:', saveErr.message);
+        }
+      }
     });
 
     peer.on('file-complete', async (result) => {
@@ -187,17 +220,21 @@ export function SessionPage() {
   const handleFilesSelected = async (files) => {
     if (!peerRef.current || peerStatus !== 'connected') return;
 
-    // Add files to queue UI optimistically
-    const newItems = files.map((file, idx) => ({
-      id: `local_${Date.now()}_${idx}`,
-      name: file.name,
-      size: file.size,
-      direction: 'sent',
-      status: 'queued',
-      percent: 0,
-      bytes: 0,
-      speedBps: 0,
-    }));
+    // Attach stable unique id to each file object and queue item
+    const newItems = files.map((file, idx) => {
+      const fileId = file.id || `f_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 7)}`;
+      file.id = fileId;
+      return {
+        id: fileId,
+        name: file.name,
+        size: file.size,
+        direction: 'sent',
+        status: 'queued',
+        percent: 0,
+        bytes: 0,
+        speedBps: 0,
+      };
+    });
 
     setQueue((prev) => [...newItems, ...prev]);
 
@@ -209,14 +246,16 @@ export function SessionPage() {
   };
 
   const handleCancel = (fileId) => {
+    console.log('[SessionPage] Cancel button clicked for id:', fileId);
     if (peerRef.current) {
       peerRef.current.cancel(fileId);
+    } else {
+      setQueue((prev) =>
+        prev.map((item) =>
+          item.id === fileId ? { ...item, status: 'cancelled', error: 'Cancelled' } : item
+        )
+      );
     }
-    setQueue((prev) =>
-      prev.map((item) =>
-        item.id === fileId ? { ...item, status: 'cancelled', error: 'Cancelled by user' } : item
-      )
-    );
   };
 
   const handleExtendSession = async () => {

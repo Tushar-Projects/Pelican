@@ -38,6 +38,7 @@ export class Peer extends EventEmitter {
     this._cancelledFiles = new Set();
     this._readyResolvers = new Map(); // fileId -> resolve
     this._doneResolvers = new Map(); // fileId -> resolve
+    this._transfers = new Map(); // fileId -> { id, name, size, direction, cancelled, drainResolver, readyTimeout, doneTimeout }
 
     this._closed = false;
     this._incomingFile = null;
@@ -326,6 +327,28 @@ export class Peer extends EventEmitter {
       case 'meta': {
         // Incoming file descriptor
         const { id, name, size, mime, totalChunks } = msg;
+        let transfer = this._transfers.get(id);
+        if (!transfer) {
+          transfer = {
+            id,
+            name,
+            size,
+            direction: 'received',
+            cancelled: false,
+          };
+          this._transfers.set(id, transfer);
+        } else {
+          transfer.name = name;
+          transfer.size = size;
+          transfer.direction = 'received';
+        }
+
+        if (transfer.cancelled) {
+          console.log(`[Peer] Received meta for already cancelled file ${id}`);
+          this._sendDataMessage(ControlMessages.cancel(id));
+          return;
+        }
+
         this._incomingFile = {
           id,
           name,
@@ -335,6 +358,7 @@ export class Peer extends EventEmitter {
           chunks: new Map(),
           receivedBytes: 0,
           startTime: Date.now(),
+          cancelled: false,
         };
 
         this.emit('incoming', { id, name, size });
@@ -357,6 +381,14 @@ export class Peer extends EventEmitter {
       case 'end': {
         // File chunks finished; assemble and verify
         if (this._incomingFile && this._incomingFile.id === msg.id) {
+          const transfer = this._transfers.get(msg.id);
+          if (transfer && transfer.cancelled) {
+            console.log(`[Peer] Received end for cancelled file ${msg.id}, ignoring`);
+            return;
+          }
+          if (this._incomingFile.cancelled) {
+            return;
+          }
           await this._finalizeIncomingFile();
         }
         break;
@@ -373,13 +405,66 @@ export class Peer extends EventEmitter {
       }
 
       case 'cancel': {
-        if (this._incomingFile && this._incomingFile.id === msg.id) {
-          this.emit('error', {
-            code: 'TRANSFER_CANCELLED',
-            message: `Transfer cancelled for file: ${this._incomingFile.name}`,
-          });
+        const fileId = msg.id;
+        console.log('[Peer] Received cancel control message for id:', fileId);
+        let transfer = this._transfers.get(fileId);
+        if (!transfer) {
+          transfer = {
+            id: fileId,
+            cancelled: true,
+          };
+          this._transfers.set(fileId, transfer);
+        } else {
+          transfer.cancelled = true;
+        }
+
+        // Free timers
+        if (transfer.readyTimeout) {
+          clearTimeout(transfer.readyTimeout);
+          transfer.readyTimeout = null;
+        }
+        if (transfer.doneTimeout) {
+          clearTimeout(transfer.doneTimeout);
+          transfer.doneTimeout = null;
+        }
+
+        // Resolve any pending backpressure drain promise
+        if (transfer.drainResolver) {
+          transfer.drainResolver();
+          transfer.drainResolver = null;
+        }
+
+        // Resolve ready/done resolvers if pending
+        if (this._readyResolvers.has(fileId)) {
+          const resolve = this._readyResolvers.get(fileId);
+          this._readyResolvers.delete(fileId);
+          resolve({ id: fileId, have: [] });
+        }
+        if (this._doneResolvers.has(fileId)) {
+          const resolve = this._doneResolvers.get(fileId);
+          this._doneResolvers.delete(fileId);
+          resolve({ id: fileId, sha256: null });
+        }
+
+        // If receiving this file, drop received chunks and clear incomingFile
+        if (this._incomingFile && this._incomingFile.id === fileId) {
+          transfer.name = transfer.name || this._incomingFile.name;
+          transfer.size = transfer.size || this._incomingFile.size;
+          transfer.direction = 'received';
+          this._incomingFile.cancelled = true;
+          if (this._incomingFile.chunks) {
+            this._incomingFile.chunks.clear();
+          }
           this._incomingFile = null;
         }
+
+        this.emit('cancelled', {
+          id: fileId,
+          name: transfer.name || 'File',
+          size: transfer.size || 0,
+          direction: transfer.direction || 'sent',
+          status: 'cancelled',
+        });
         break;
       }
 
@@ -389,7 +474,9 @@ export class Peer extends EventEmitter {
   }
 
   async _handleBinaryFrame(buffer) {
-    if (!this._incomingFile) return;
+    if (!this._incomingFile || this._incomingFile.cancelled) return;
+    const transfer = this._transfers.get(this._incomingFile.id);
+    if (transfer && transfer.cancelled) return;
 
     const { chunkIndex, chunkData } = decodeBinaryFrame(buffer);
     this._incomingFile.chunks.set(chunkIndex, chunkData);
@@ -467,17 +554,46 @@ export class Peer extends EventEmitter {
   /**
    * Backpressure helper: waits until bufferedAmount drops below threshold.
    */
-  _waitForBufferDrain() {
-    return new Promise((resolve) => {
-      if (!this.channel || this.channel.bufferedAmount <= BUFFERED_AMOUNT_LOW_THRESHOLD) {
-        resolve();
-        return;
-      }
+  _waitForBufferDrain(state) {
+    if (state && state.cancelled) {
+      return Promise.resolve();
+    }
 
+    if (!this.channel || this.channel.bufferedAmount <= BUFFERED_AMOUNT_LOW_THRESHOLD) {
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve) => {
+      let resolved = false;
       const onLow = () => {
-        this.channel.removeEventListener('bufferedamountlow', onLow);
+        if (resolved) return;
+        resolved = true;
+        if (this.channel) {
+          try {
+            this.channel.removeEventListener('bufferedamountlow', onLow);
+          } catch (e) {}
+        }
+        if (state && state.drainResolver === resolver) {
+          state.drainResolver = null;
+        }
         resolve();
       };
+
+      const resolver = () => {
+        if (resolved) return;
+        resolved = true;
+        if (this.channel) {
+          try {
+            this.channel.removeEventListener('bufferedamountlow', onLow);
+          } catch (e) {}
+        }
+        resolve();
+      };
+
+      if (state) {
+        state.drainResolver = resolver;
+      }
+
       this.channel.addEventListener('bufferedamountlow', onLow);
     });
   }
@@ -501,10 +617,32 @@ export class Peer extends EventEmitter {
   }
 
   async _sendFile(file, index) {
-    const fileId = `f_${Date.now()}_${index}`;
+    const fileId = file.id || `f_${Date.now()}_${index}`;
     const totalChunks = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
     const mime = file.type || 'application/octet-stream';
     const fileName = file.name || `file_${index}`;
+
+    let state = this._transfers.get(fileId);
+    if (!state) {
+      state = {
+        id: fileId,
+        name: fileName,
+        size: file.size,
+        direction: 'sent',
+        cancelled: false,
+        drainResolver: null,
+      };
+      this._transfers.set(fileId, state);
+    } else {
+      state.name = fileName;
+      state.size = file.size;
+      state.direction = 'sent';
+    }
+
+    if (state.cancelled) {
+      console.log(`[Peer] Transfer for ${fileId} was already cancelled before send`);
+      return;
+    }
 
     // 1. Send meta control message
     this._sendDataMessage(
@@ -514,7 +652,7 @@ export class Peer extends EventEmitter {
     // 2. Wait for receiver's ready message
     const readyPromise = new Promise((resolve, reject) => {
       this._readyResolvers.set(fileId, resolve);
-      setTimeout(() => {
+      state.readyTimeout = setTimeout(() => {
         if (this._readyResolvers.has(fileId)) {
           this._readyResolvers.delete(fileId);
           reject(new Error(`Timeout waiting for ready from receiver for ${fileName}`));
@@ -523,20 +661,20 @@ export class Peer extends EventEmitter {
     });
 
     const readyMsg = await readyPromise;
-    const haveSet = new Set(readyMsg.have || []);
+    if (state.cancelled) {
+      console.log(`[Peer] Transfer for ${fileId} cancelled during ready wait`);
+      return;
+    }
+
+    const haveSet = new Set(readyMsg?.have || []);
 
     const startTime = Date.now();
     let bytesSent = 0;
 
     // 3. Send binary chunks with backpressure
     for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
-      if (this._cancelledFiles.has(fileId)) {
-        this._sendDataMessage(ControlMessages.cancel(fileId));
-        this.emit('error', {
-          code: 'TRANSFER_CANCELLED',
-          message: `Transfer cancelled for file: ${fileName}`,
-        });
-        throw new Error(`Transfer cancelled for file ${fileId}`);
+      if (state.cancelled) {
+        break;
       }
 
       if (haveSet.has(chunkIdx)) {
@@ -552,11 +690,22 @@ export class Peer extends EventEmitter {
       const slice = file.slice(start, end);
       const chunkBuffer = await slice.arrayBuffer();
 
+      if (state.cancelled) {
+        break;
+      }
+
       const frame = encodeBinaryFrame(chunkIdx, chunkBuffer);
 
       // Backpressure check: pause when bufferedAmount > 1048576 (1 MB)
-      if (this.channel.bufferedAmount > BUFFERED_AMOUNT_HIGH_THRESHOLD) {
-        await this._waitForBufferDrain();
+      if (this.channel && this.channel.bufferedAmount > BUFFERED_AMOUNT_HIGH_THRESHOLD) {
+        await this._waitForBufferDrain(state);
+        if (state.cancelled) {
+          break;
+        }
+      }
+
+      if (!this.channel || this.channel.readyState !== 'open') {
+        throw new Error('Data channel closed during transfer');
       }
 
       this.channel.send(frame);
@@ -581,13 +730,18 @@ export class Peer extends EventEmitter {
       });
     }
 
+    if (state.cancelled) {
+      console.log(`[Peer] Transfer for ${fileId} was cancelled during chunk sending. Skipping end message.`);
+      return;
+    }
+
     // 4. Send end control message
     this._sendDataMessage(ControlMessages.end(fileId));
 
     // 5. Wait for receiver's done message containing verified SHA-256
     const donePromise = new Promise((resolve, reject) => {
       this._doneResolvers.set(fileId, resolve);
-      setTimeout(() => {
+      state.doneTimeout = setTimeout(() => {
         if (this._doneResolvers.has(fileId)) {
           this._doneResolvers.delete(fileId);
           reject(new Error(`Timeout waiting for done verification for ${fileName}`));
@@ -596,6 +750,11 @@ export class Peer extends EventEmitter {
     });
 
     const doneMsg = await donePromise;
+    if (state.cancelled) {
+      console.log(`[Peer] Transfer for ${fileId} cancelled during done wait`);
+      return;
+    }
+
     const durationMs = Math.max(1, Date.now() - startTime);
     const avgSpeedBps = Math.round(file.size / (durationMs / 1000));
 
@@ -611,16 +770,86 @@ export class Peer extends EventEmitter {
   }
 
   cancel(id) {
-    this._cancelledFiles.add(id);
+    console.log('[Peer] cancel called for id:', id);
+    let state = this._transfers.get(id);
+    if (!state) {
+      state = {
+        id,
+        cancelled: true,
+      };
+      this._transfers.set(id, state);
+    } else {
+      state.cancelled = true;
+    }
+
+    // Free timers
+    if (state.readyTimeout) {
+      clearTimeout(state.readyTimeout);
+      state.readyTimeout = null;
+    }
+    if (state.doneTimeout) {
+      clearTimeout(state.doneTimeout);
+      state.doneTimeout = null;
+    }
+
+    // Resolve any pending backpressure drain promise
+    if (state.drainResolver) {
+      state.drainResolver();
+      state.drainResolver = null;
+    }
+
+    // Resolve ready/done resolvers if pending
+    if (this._readyResolvers.has(id)) {
+      const resolve = this._readyResolvers.get(id);
+      this._readyResolvers.delete(id);
+      resolve({ id, have: [] });
+    }
+    if (this._doneResolvers.has(id)) {
+      const resolve = this._doneResolvers.get(id);
+      this._doneResolvers.delete(id);
+      resolve({ id, sha256: null });
+    }
+
+    // If receiving this file, drop received chunks and clear incomingFile
+    if (this._incomingFile && this._incomingFile.id === id) {
+      state.name = state.name || this._incomingFile.name;
+      state.size = state.size || this._incomingFile.size;
+      state.direction = 'received';
+      this._incomingFile.cancelled = true;
+      if (this._incomingFile.chunks) {
+        this._incomingFile.chunks.clear();
+      }
+      this._incomingFile = null;
+    }
+
+    // Send cancel control message over data channel if open
     this._sendDataMessage(ControlMessages.cancel(id));
-    this.emit('error', {
-      code: 'TRANSFER_CANCELLED',
-      message: `Cancelled file ${id}`,
+
+    // Emit terminal cancelled event
+    this.emit('cancelled', {
+      id,
+      name: state.name || 'File',
+      size: state.size || 0,
+      direction: state.direction || 'sent',
+      status: 'cancelled',
     });
   }
 
   close() {
     this._closed = true;
+
+    // Free any active drain resolvers
+    for (const transfer of this._transfers.values()) {
+      if (transfer.drainResolver) {
+        transfer.drainResolver();
+        transfer.drainResolver = null;
+      }
+    }
+
+    if (this._incomingFile && this._incomingFile.chunks) {
+      this._incomingFile.chunks.clear();
+      this._incomingFile = null;
+    }
 
     this._sendSignaling({ type: 'leave' });
 

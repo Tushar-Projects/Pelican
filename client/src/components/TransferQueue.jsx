@@ -108,7 +108,7 @@ export function TransferQueue({ items = [], onCancel }) {
 
               {isFailed && (
                 <div className="queue-failed-summary">
-                  <span className="text-rose-400">✗ {item.error || 'Transfer failed or cancelled'}</span>
+                  <span className="text-rose-400">✗ {item.status === 'cancelled' ? 'Cancelled' : (item.error || 'Transfer failed')}</span>
                 </div>
               )}
             </div>
