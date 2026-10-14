@@ -47,8 +47,20 @@ export function SessionPage() {
 
   const peerRef = useRef(null);
   const pendingProgressRef = useRef(new Map());
-  const progressRafRef = useRef(null);
+  const progressTimerRef = useRef(null);
+  const isRafRef = useRef(false);
   const normalizedCode = (code || '').trim().toUpperCase();
+
+  const cancelProgressTimer = () => {
+    if (progressTimerRef.current !== null) {
+      if (isRafRef.current) {
+        cancelAnimationFrame(progressTimerRef.current);
+      } else {
+        clearTimeout(progressTimerRef.current);
+      }
+      progressTimerRef.current = null;
+    }
+  };
 
   // Route title
   useEffect(() => {
@@ -109,9 +121,59 @@ export function SessionPage() {
 
     peerRef.current = peer;
 
+    const flushProgress = () => {
+      progressTimerRef.current = null;
+      if (cancelled || pendingProgressRef.current.size === 0) return;
+
+      const batch = new Map(pendingProgressRef.current);
+      pendingProgressRef.current.clear();
+
+      setQueue((prev) => {
+        let changed = false;
+        const next = prev.map((item) => {
+          const update = batch.get(item.id);
+          if (
+            !update ||
+            item.status === 'cancelled' ||
+            item.status === 'completed' ||
+            item.status === 'failed'
+          ) {
+            return item;
+          }
+          if (
+            item.status === 'in_progress' &&
+            item.percent === update.percent &&
+            item.bytes === update.bytes &&
+            item.speedBps === update.speedBps &&
+            item.etaSec === update.etaSec
+          ) {
+            return item;
+          }
+          changed = true;
+          return { ...item, ...update, status: 'in_progress' };
+        });
+        return changed ? next : prev;
+      });
+    };
+
     peer.on('status', (s) => {
       if (cancelled) return;
       setPeerStatus(s);
+      if (s === 'disconnected' || s === 'failed') {
+        cancelProgressTimer();
+        pendingProgressRef.current.clear();
+        setQueue((prev) =>
+          prev.map((item) =>
+            item.status === 'in_progress' || item.status === 'queued'
+              ? {
+                  ...item,
+                  status: 'failed',
+                  error: s === 'disconnected' ? 'Peer disconnected' : 'Connection failed',
+                }
+              : item
+          )
+        );
+      }
     });
 
     peer.on('peer', ({ deviceName: rDevice }) => {
@@ -142,36 +204,22 @@ export function SessionPage() {
       if (cancelled) return;
       pendingProgressRef.current.set(progress.id, progress);
 
-      if (!progressRafRef.current) {
-        progressRafRef.current = requestAnimationFrame(() => {
-          progressRafRef.current = null;
-          if (cancelled || pendingProgressRef.current.size === 0) return;
+      // Final 100% must always be applied immediately
+      if (progress.percent === 100) {
+        cancelProgressTimer();
+        flushProgress();
+        return;
+      }
 
-          const batch = new Map(pendingProgressRef.current);
-          pendingProgressRef.current.clear();
-
-          setQueue((prev) => {
-            let changed = false;
-            const next = prev.map((item) => {
-              const update = batch.get(item.id);
-              if (!update || item.status === 'cancelled' || item.status === 'completed') {
-                return item;
-              }
-              if (
-                item.status === 'in_progress' &&
-                item.percent === update.percent &&
-                item.bytes === update.bytes &&
-                item.speedBps === update.speedBps &&
-                item.etaSec === update.etaSec
-              ) {
-                return item;
-              }
-              changed = true;
-              return { ...item, ...update, status: 'in_progress' };
-            });
-            return changed ? next : prev;
-          });
-        });
+      if (!progressTimerRef.current) {
+        // Fallback to setTimeout (100ms) when backgrounded (document.hidden) because RAF is paused
+        if (typeof document !== 'undefined' && document.hidden) {
+          isRafRef.current = false;
+          progressTimerRef.current = setTimeout(flushProgress, 100);
+        } else {
+          isRafRef.current = true;
+          progressTimerRef.current = requestAnimationFrame(flushProgress);
+        }
       }
     });
 
@@ -209,7 +257,7 @@ export function SessionPage() {
       pendingProgressRef.current.delete(result.id);
       setQueue((prev) =>
         prev.map((item) =>
-          item.id === result.id ? { ...item, ...result, status: 'completed' } : item
+          item.id === result.id ? { ...item, ...result, percent: 100, status: 'completed' } : item
         )
       );
 
@@ -235,7 +283,17 @@ export function SessionPage() {
 
     peer.on('error', async (err) => {
       if (cancelled) return;
+      cancelProgressTimer();
+      pendingProgressRef.current.clear();
       setErrorMessage(err.message || 'Transfer error occurred');
+      setQueue((prev) =>
+        prev.map((item) =>
+          item.status === 'in_progress' || item.status === 'queued'
+            ? { ...item, status: 'failed', error: err.message || 'Transfer failed' }
+            : item
+        )
+      );
+
       if (isAuthenticated) {
         try {
           await recordTransfer({
@@ -257,10 +315,7 @@ export function SessionPage() {
 
     return () => {
       cancelled = true;
-      if (progressRafRef.current) {
-        cancelAnimationFrame(progressRafRef.current);
-        progressRafRef.current = null;
-      }
+      cancelProgressTimer();
       pendingProgressRef.current.clear();
       peerRef.current = null;
       peer.close();
@@ -369,6 +424,8 @@ export function SessionPage() {
 
   const handleCloseSession = async () => {
     try {
+      cancelProgressTimer();
+      pendingProgressRef.current.clear();
       await updateSession(normalizedCode, { status: 'closed' });
       navigate('/');
     } catch (err) {
