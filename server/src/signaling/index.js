@@ -17,13 +17,48 @@ function generatePeerId() {
   return 'p_' + Math.random().toString(36).substring(2, 9);
 }
 
+const ngrokSuffixes = ['.ngrok-free.app', '.ngrok-free.dev', '.ngrok.app', '.ngrok.io'];
+
+function isAllowedSignalingOrigin(origin) {
+  if (!origin) return true;
+  const clientOrigin = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+  if (origin === clientOrigin) return true;
+
+  // Localhost and LAN IPs
+  if (/^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/.test(origin)) {
+    return true;
+  }
+
+  // ngrok origins (.ngrok-free.app, .ngrok-free.dev, .ngrok.app, .ngrok.io)
+  try {
+    const { hostname } = new URL(origin);
+    if (ngrokSuffixes.some((suffix) => hostname.endsWith(suffix) || hostname === suffix.slice(1))) {
+      return true;
+    }
+  } catch (e) {
+    // Malformed origin
+  }
+
+  return false;
+}
+
 /**
  * Attaches the WebSocket signaling server to an HTTP/HTTPS server at path /ws.
  * @param {import('http').Server} server
  * @returns {WebSocketServer}
  */
 export function attachSignaling(server) {
-  const wss = new WebSocketServer({ server, path: '/ws' });
+  const wss = new WebSocketServer({
+    server,
+    path: '/ws',
+    verifyClient: (info, callback) => {
+      const origin = info.origin || info.req?.headers?.origin;
+      if (!origin || isAllowedSignalingOrigin(origin)) {
+        return callback(true);
+      }
+      return callback(false, 403, 'Forbidden origin');
+    },
+  });
 
   // Heartbeat & expiration interval (25 seconds per Rule 4)
   const heartbeatInterval = setInterval(async () => {

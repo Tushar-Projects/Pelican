@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { getSession, updateSession } from '../api/sessions.js';
 import { recordTransfer } from '../api/transfers.js';
 import { createPeer } from '../api/peerProvider.js';
+import { WS_URL } from '../config.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import DropZone from '../components/DropZone.jsx';
@@ -57,11 +58,6 @@ export function SessionPage() {
     if (errorMessage || !normalizedCode) return;
     let cancelled = false;
 
-    const rawWsUrl = (import.meta.env.VITE_WS_URL || '').trim();
-    const wsUrl = rawWsUrl || (typeof window !== 'undefined' && window.location
-      ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`
-      : 'ws://localhost:5000/ws');
-
     const iceServers = [];
     if (import.meta.env.VITE_STUN_URL) {
       iceServers.push({ urls: import.meta.env.VITE_STUN_URL });
@@ -77,7 +73,7 @@ export function SessionPage() {
     const peer = createPeer({
       code: normalizedCode,
       deviceName,
-      wsUrl,
+      wsUrl: WS_URL,
       iceServers: iceServers.length > 0 ? iceServers : undefined,
     });
 

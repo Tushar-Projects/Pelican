@@ -1,12 +1,9 @@
 import axios from 'axios';
 
-// API base: VITE_API_URL if set, else '' (relative '/api/...')
-const rawApiUrl = (import.meta.env.VITE_API_URL || '').trim();
-const API_BASE = rawApiUrl ? rawApiUrl.replace(/\/+$/, '') : '';
-const baseURL = API_BASE ? (API_BASE.endsWith('/api') ? API_BASE : `${API_BASE}/api`) : '/api';
+import { API_BASE } from '../config.js';
 
 export const apiClient = axios.create({
-  baseURL,
+  baseURL: `${API_BASE}/api`,
   headers: {
     'Content-Type': 'application/json',
   },
