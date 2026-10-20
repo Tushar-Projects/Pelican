@@ -1,5 +1,5 @@
 {
-  "name": "droprelay-server",
+  "name": "pelican-server",
   "version": "1.0.0",
   "description": "DropRelay backend: Express REST API, MongoDB Mongoose models, and WebRTC WebSocket signaling server",
   "type": "module",

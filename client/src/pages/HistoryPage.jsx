@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowDownLeft, ArrowUpRight, Trash2 } from 'lucide-react';
-import { getTransfers, deleteTransfer, clearAllTransfers } from '../api/transfers.js';
+import { getTransfers, deleteTransfer, clearAllTransfers, toLocalStartOfDayIso, toLocalEndOfDayIso } from '../api/transfers.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
 
@@ -65,8 +65,8 @@ export function HistoryPage() {
       };
       if (searchQuery.trim()) params.q = searchQuery.trim();
       if (statusFilter) params.status = statusFilter;
-      if (fromDate) params.from = fromDate;
-      if (toDate) params.to = toDate;
+      if (fromDate) params.from = toLocalStartOfDayIso(fromDate);
+      if (toDate) params.to = toLocalEndOfDayIso(toDate);
 
       const data = await getTransfers(params);
       setItems(data.items || []);

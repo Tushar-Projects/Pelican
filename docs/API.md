@@ -180,7 +180,7 @@ Public endpoint to check session validity prior to joining.
   - `404 Not Found`: `{ "error": "Session not found" }` (returned if code does not exist, or if `expiresAt <= now`, or status is `closed`/`expired`).
 
 ### 3.4 Update Session
-Extends the session duration or marks it as closed. Only the session host can update it if a host exists.
+Extends the session duration or marks it as closed. Strict host check: only the authenticated session host can modify the session. Guest sessions (`hostUserId: null`) cannot be modified through this route.
 
 - **Method**: `PATCH`
 - **Path**: `/api/sessions/:code`
@@ -209,18 +209,18 @@ Extends the session duration or marks it as closed. Only the session host can up
 - **Errors**:
   - `400 Bad Request`: `{ "error": "extendMinutes must be a positive number" }`
   - `400 Bad Request`: `{ "error": "Invalid status update" }`
-  - `403 Forbidden`: `{ "error": "Not authorized to modify this session" }`
+  - `403 Forbidden`: `{ "error": "Only the session host can modify this session" }`
   - `404 Not Found`: `{ "error": "Session not found" }`
 
 ### 3.5 Delete Session
-Deletes a session document.
+Deletes a session document. Strict host check: only the authenticated session host can delete the session. Guest sessions (`hostUserId: null`) cannot be deleted through this route.
 
 - **Method**: `DELETE`
 - **Path**: `/api/sessions/:code`
 - **Auth**: Required (`Bearer <token>`)
 - **Success Response**: `204 No Content`
 - **Errors**:
-  - `403 Forbidden`: `{ "error": "Not authorized to delete this session" }`
+  - `403 Forbidden`: `{ "error": "Only the session host can modify this session" }`
   - `404 Not Found`: `{ "error": "Session not found" }`
 
 ---
@@ -279,8 +279,8 @@ Lists paginated transfer logs for the authenticated user, supporting search and 
 - **Query Parameters**:
   - `q` *(optional)*: Search string matching `fileName`, `sessionCode`, or `deviceName` (case-insensitive regex).
   - `status` *(optional)*: Filter by `'completed'`, `'failed'`, or `'cancelled'`.
-  - `from` *(optional)*: ISO 8601 date string for items created on or after date.
-  - `to` *(optional)*: ISO 8601 date string for items created on or before date.
+  - `from` *(optional)*: ISO 8601 date string or `YYYY-MM-DD` for items created on or after date.
+  - `to` *(optional)*: ISO 8601 date string or date-only `YYYY-MM-DD`. Date-only format means the end of that day (resolves to `T23:59:59.999Z` in UTC) for `$lte`. Full ISO strings pass through unchanged. Client applications send local-day ISO bounds (start of local day for `from`, end of local day for `to`).
   - `page` *(optional, default: 1)*: Page number.
   - `limit` *(optional, default: 20, max: 100)*: Items per page.
 - **Success Response** (`200 OK`):
@@ -306,6 +306,9 @@ Lists paginated transfer logs for the authenticated user, supporting search and 
     "page": 1
   }
   ```
+- **Errors**:
+  - `400 Bad Request`: `{ "error": "Invalid date parameter" }` (returned when `from` or `to` cannot be parsed into a valid date).
+
 
 ### 4.3 Delete Single Transfer Record
 Deletes a specific transfer log entry belonging to the user.

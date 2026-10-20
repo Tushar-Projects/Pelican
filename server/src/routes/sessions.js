@@ -4,6 +4,10 @@ import { requireAuth, optionalAuth } from '../middleware/auth.js';
 
 const router = express.Router();
 
+export function isHost(session, user) {
+  return Boolean(session && session.hostUserId) && Boolean(user && user._id) && session.hostUserId.toString() === user._id.toString();
+}
+
 // POST /sessions (optional auth)
 router.post('/', optionalAuth, async (req, res) => {
   try {
@@ -98,9 +102,9 @@ router.patch('/:code', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Session not found' });
     }
 
-    // If session has a host, only the host can update it
-    if (session.hostUserId && session.hostUserId.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ error: 'Not authorized to modify this session' });
+    // Strict host check: only the session host can modify the session
+    if (!isHost(session, req.user)) {
+      return res.status(403).json({ error: 'Only the session host can modify this session' });
     }
 
     const { extendMinutes, status } = req.body || {};
@@ -136,8 +140,9 @@ router.delete('/:code', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Session not found' });
     }
 
-    if (session.hostUserId && session.hostUserId.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ error: 'Not authorized to delete this session' });
+    // Strict host check: only the session host can modify the session
+    if (!isHost(session, req.user)) {
+      return res.status(403).json({ error: 'Only the session host can modify this session' });
     }
 
     await Session.deleteOne({ _id: session._id });

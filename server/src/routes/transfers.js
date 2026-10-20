@@ -4,6 +4,30 @@ import { requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
 
+export function parseDateFilter(from, to) {
+  const dateFilter = {};
+  if (from !== undefined && from !== null && String(from).trim() !== '') {
+    const fromStr = String(from).trim();
+    const fromDate = new Date(fromStr);
+    if (isNaN(fromDate.getTime())) {
+      throw new Error('Invalid date parameter');
+    }
+    dateFilter.$gte = fromDate;
+  }
+  if (to !== undefined && to !== null && String(to).trim() !== '') {
+    const toStr = String(to).trim();
+    const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(toStr);
+    const toDate = isDateOnly
+      ? new Date(`${toStr}T23:59:59.999Z`)
+      : new Date(toStr);
+    if (isNaN(toDate.getTime()) || (isDateOnly && toDate.toISOString().slice(0, 10) !== toStr)) {
+      throw new Error('Invalid date parameter');
+    }
+    dateFilter.$lte = toDate;
+  }
+  return dateFilter;
+}
+
 // POST /transfers (auth required)
 router.post('/', requireAuth, async (req, res) => {
   try {
@@ -71,21 +95,13 @@ router.get('/', requireAuth, async (req, res) => {
     }
 
     if (from || to) {
-      filter.createdAt = {};
-      if (from) {
-        const fromDate = new Date(from);
-        if (!isNaN(fromDate.getTime())) {
-          filter.createdAt.$gte = fromDate;
+      try {
+        const dateFilter = parseDateFilter(from, to);
+        if (Object.keys(dateFilter).length > 0) {
+          filter.createdAt = dateFilter;
         }
-      }
-      if (to) {
-        const toDate = new Date(to);
-        if (!isNaN(toDate.getTime())) {
-          filter.createdAt.$lte = toDate;
-        }
-      }
-      if (Object.keys(filter.createdAt).length === 0) {
-        delete filter.createdAt;
+      } catch (err) {
+        return res.status(400).json({ error: err.message || 'Invalid date parameter' });
       }
     }
 
