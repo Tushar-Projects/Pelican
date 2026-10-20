@@ -1,0 +1,13 @@
+{
+  "name": "pelican",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Peer-to-peer file transfer directly between browsers using WebRTC data channels",
+  "scripts": {
+    "test": "npm test --prefix client && npm test --prefix server",
+    "test:client": "npm test --prefix client",
+    "test:server": "npm test --prefix server",
+    "build:client": "npm run build --prefix client",
+    "check:contrast": "npm run check:contrast --prefix client"
+  }
+}
