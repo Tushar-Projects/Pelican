@@ -8,19 +8,33 @@ Pelican provides a private, fast, and simple way to send files between devices o
 
 ## Screenshots
 
-Visual documentation of the key workflows is organized in the `docs/screenshots/` directory.
+Visual documentation of the key workflows across Pelican:
 
-| Screenshot | Description | Target Path |
-|---|---|---|
-| Pairing Screen | 6-character room code, QR code modal, and connection status | `docs/screenshots/pairing.png` |
-| Active Transfer | Live progress bar with transfer rate, byte metrics, and ETA | `docs/screenshots/transfer.png` |
-| Completed Transfer | Verified completion summary with duration, average speed, and SHA-256 hash | `docs/screenshots/completed.png` |
-| Transfer History | Audit table of sent and received transfers with search and status filters | `docs/screenshots/history.png` |
-| Trusted Devices | Known browsers and machines paired with account, rename inputs, and trust toggles | `docs/screenshots/devices.png` |
-| Authentication | Clean login and registration card | `docs/screenshots/login.png` |
-| Dark Mode | Warm stone dark theme meeting WCAG 2.1 AA contrast standards | `docs/screenshots/dark-mode.png` |
+### Pairing Screen
+6-character room code, QR code modal, and connection status.
+![Pairing Screen](docs/screenshots/pairing.png)
 
-*(Refer to `docs/screenshots/README.md` for image dimensions and capture guidance.)*
+### Active File Transfer
+Live progress bar with real-time transfer rate, byte metrics, and ETA.
+![Active Transfer](docs/screenshots/transfer.png)
+
+### Completed Transfer
+Verified completion summary with duration, average throughput, and SHA-256 hash.
+![Completed Transfer](docs/screenshots/completed.png)
+
+### Transfer History
+Audit table of sent and received transfers with search and status filters.
+![Transfer History](docs/screenshots/history.png)
+
+### Trusted Devices
+Known browsers and machines paired with account, rename inputs, and trust toggles.
+![Trusted Devices](docs/screenshots/devices.png)
+
+### Authentication
+Clean login and registration cards.
+![Login Screen](docs/screenshots/login.png)
+
+![Registration Screen](docs/screenshots/registration.png)
 
 ---
 
@@ -108,7 +122,7 @@ flowchart TD
     EngineA <-->|"Gather Public Candidates"| STUN
     EngineB <-->|"Gather Public Candidates"| STUN
 
-    EngineA <==|"Direct WebRTC DataChannel (64 KB Chunks, 0-Copy)"|==> EngineB
+    EngineA <-->|"Direct WebRTC DataChannel (64 KB Chunks, 0-Copy)"| EngineB
 ```
 
 > **Zero Cloud Storage Note**: File payloads travel strictly over the direct peer-to-peer data channel between Browser A and Browser B. File contents never pass through the Express server, WebSocket signaling sockets, or MongoDB.
